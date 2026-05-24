@@ -1,0 +1,572 @@
+import { BrandKey, getBrandConfig } from "../brands";
+import {
+  EvaluationResponse,
+  normalizeAndValidateResponse,
+} from "../validation/evaluate-response";
+
+/**
+ * Main evaluation function. Calls Aliyun DashScope (Bailian) API if API key is present.
+ * Otherwise, falls back to a smart mock evaluator for local development and testing.
+ */
+export async function evaluateContent(
+  brandKey: BrandKey,
+  caption: string,
+  contentType: string,
+  serving: string,
+  images: { base64: string; mimeType: string }[],
+): Promise<EvaluationResponse> {
+  const brandConfig = getBrandConfig(brandKey);
+  const systemPrompt = brandConfig.buildSystemPrompt(contentType, serving);
+  const expectedCriteriaNames = brandConfig.criteria.map((c) => c.name);
+
+  const apiKey = process.env.BAILIAN_API_KEY;
+  const baseUrl =
+    process.env.BAILIAN_BASE_URL ||
+    "https://coding-intl.dashscope.aliyuncs.com/v1";
+  const model = process.env.BAILIAN_MODEL || "qwen3.6-plus";
+
+  // --- MOCK FALLBACK (If Bailian API Key is missing) ---
+  if (!apiKey || apiKey.trim() === "") {
+    console.warn("BAILIAN_API_KEY is not set. Falling back to Mock Evaluator.");
+    return runMockEvaluator(
+      brandKey,
+      caption,
+      contentType,
+      serving,
+      images.length > 0,
+    );
+  }
+
+  type MessageContentPart =
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string } };
+
+  // Construct messages content array in OpenAI multimodal format
+  const contentArray: MessageContentPart[] = [
+    {
+      type: "text",
+      text: `Caption/Nội dung để chấm điểm:
+"""
+${caption}
+"""
+
+Metadata:
+- Loại content: ${contentType}
+- Phục vụ: ${serving}
+- Số lượng ảnh: ${images.length}`,
+    },
+  ];
+
+  // Map images to OpenAI image blocks
+  for (const img of images) {
+    contentArray.push({
+      type: "image_url",
+      image_url: {
+        url: `data:${img.mimeType};base64,${img.base64}`,
+      },
+    });
+  }
+
+  try {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: contentArray },
+        ],
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("DashScope API error response:", errorText);
+      let errMsg = `HTTP error! status: ${response.status}`;
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson?.error?.message) {
+          errMsg = errorJson.error.message;
+        }
+      } catch {
+        // Ignore JSON parse errors for error text
+      }
+      const errObj = new Error(errMsg) as Error & { status?: number };
+      errObj.status = response.status;
+      throw errObj;
+    }
+
+    const responseJson = await response.json();
+    const rawContent = responseJson.choices?.[0]?.message?.content;
+    if (!rawContent) {
+      throw new Error("No output returned from AI API.");
+    }
+
+    // Advanced JSON extraction to handle chatty LLMs
+    let cleanContent = rawContent.trim();
+    const jsonBlockMatch = cleanContent.match(
+      /```(?:json)?\s*([\s\S]*?)\s*```/i,
+    );
+
+    if (jsonBlockMatch && jsonBlockMatch[1]) {
+      cleanContent = jsonBlockMatch[1].trim();
+    } else {
+      // Fallback: forcefully extract from first '{' to last '}'
+      const startIdx = cleanContent.indexOf("{");
+      const endIdx = cleanContent.lastIndexOf("}");
+      if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+        cleanContent = cleanContent.substring(startIdx, endIdx + 1);
+      }
+    }
+
+    const parsedJson = JSON.parse(cleanContent);
+    return normalizeAndValidateResponse(
+      parsedJson,
+      expectedCriteriaNames,
+      images.length > 0,
+    );
+  } catch (error: unknown) {
+    console.error("Error communicating with DashScope API:", error);
+    throw error;
+  }
+}
+
+/**
+ * Streaming version of evaluateContent. Returns a ReadableStream of OpenAI-compatible SSE chunks.
+ */
+export async function evaluateContentStream(
+  brandKey: BrandKey,
+  caption: string,
+  contentType: string,
+  serving: string,
+  images: { base64: string; mimeType: string }[],
+): Promise<ReadableStream<Uint8Array>> {
+  const brandConfig = getBrandConfig(brandKey);
+  const systemPrompt = brandConfig.buildSystemPrompt(contentType, serving);
+
+  const apiKey = process.env.BAILIAN_API_KEY;
+  const baseUrl =
+    process.env.BAILIAN_BASE_URL ||
+    "https://coding-intl.dashscope.aliyuncs.com/v1";
+  const model = process.env.BAILIAN_MODEL || "qwen3.6-plus";
+
+  // --- MOCK FALLBACK (If Bailian API Key is missing) ---
+  if (!apiKey || apiKey.trim() === "") {
+    console.warn("BAILIAN_API_KEY is not set. Falling back to Mock Evaluator.");
+    const mockData = runMockEvaluator(
+      brandKey,
+      caption,
+      contentType,
+      serving,
+      images.length > 0,
+    );
+    const mockJson = JSON.stringify(mockData);
+
+    const encoder = new TextEncoder();
+    return new ReadableStream({
+      async start(controller) {
+        // Stream mock JSON chunk by chunk with brief delay to mimic AI streaming
+        const chunks = [
+          `data: ${JSON.stringify({ choices: [{ delta: { content: "```json\n" } }] })}\n\n`,
+          `data: ${JSON.stringify({ choices: [{ delta: { content: mockJson } }] })}\n\n`,
+          `data: ${JSON.stringify({ choices: [{ delta: { content: "\n```" } }] })}\n\n`,
+          "data: [DONE]\n\n",
+        ];
+
+        for (const chunk of chunks) {
+          controller.enqueue(encoder.encode(chunk));
+          // Sleep for a tiny bit so the UI has a nice transition feel
+          await new Promise((resolve) => setTimeout(resolve, 80));
+        }
+        controller.close();
+      },
+    });
+  }
+
+  type MessageContentPart =
+    | { type: "text"; text: string }
+    | { type: "image_url"; image_url: { url: string } };
+
+  const contentArray: MessageContentPart[] = [
+    {
+      type: "text",
+      text: `Caption/Nội dung để chấm điểm:
+"""
+${caption}
+"""
+
+Metadata:
+- Loại content: ${contentType}
+- Phục vụ: ${serving}
+- Số lượng ảnh: ${images.length}`,
+    },
+  ];
+
+  for (const img of images) {
+    contentArray.push({
+      type: "image_url",
+      image_url: {
+        url: `data:${img.mimeType};base64,${img.base64}`,
+      },
+    });
+  }
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: model,
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: contentArray },
+      ],
+      stream: true,
+      response_format: { type: "json_object" },
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error("DashScope API error response (stream):", errorText);
+    let errMsg = `HTTP error! status: ${response.status}`;
+    try {
+      const errorJson = JSON.parse(errorText);
+      if (errorJson?.error?.message) {
+        errMsg = errorJson.error.message;
+      }
+    } catch {
+      // Ignore
+    }
+    const errObj = new Error(errMsg) as Error & { status?: number };
+    errObj.status = response.status;
+    throw errObj;
+  }
+
+  if (!response.body) {
+    throw new Error("Response body is empty.");
+  }
+
+  return response.body as ReadableStream<Uint8Array>;
+}
+
+/**
+ * Smart mock evaluator that simulates AI's review based on the text contents.
+ * Useful for local verification, testing, and offline presentation.
+ */
+function runMockEvaluator(
+  brandKey: BrandKey,
+  caption: string,
+  contentType: string,
+  serving: string,
+  hasImages: boolean,
+): EvaluationResponse {
+  const words = caption.trim().split(/\s+/);
+  const wordCount = words.length;
+
+  const lowercaseCaption = caption.toLowerCase();
+
+  // HEURISTICS FOR BONARIO
+  if (brandKey === "bonario") {
+    // 1. Pillar Fit — Check if content matches the selected pillar
+    const isPillar1 = contentType.startsWith("Pillar 1");
+    const isPillar2 = contentType.startsWith("Pillar 2");
+    const isPillar3 = contentType.startsWith("Pillar 3");
+    const hasDecodedKeywords =
+      /(cấu tạo|sợi|thành phần|bảo quản|đặc tính|cấu trúc|vật liệu)/.test(
+        lowercaseCaption,
+      );
+    const hasDesignKeywords =
+      /(logic|lý do|chọn|designer|thiết kế|không gian|phối hợp)/.test(
+        lowercaseCaption,
+      );
+    const hasRealHomesKeywords =
+      /(dự án|công trình|thực tế|case study|phân tích|không gian thực)/.test(
+        lowercaseCaption,
+      );
+    const pillarFitStatus =
+      (isPillar1 && hasDecodedKeywords) ||
+      (isPillar2 && hasDesignKeywords) ||
+      (isPillar3 && hasRealHomesKeywords) ||
+      (!isPillar1 && !isPillar2 && !isPillar3)
+        ? "PASS"
+        : "FAIL";
+    const pillarFitEvidence =
+      pillarFitStatus === "PASS"
+        ? `Content phù hợp với pillar đã chọn (${contentType}).`
+        : `Content không phù hợp với pillar đã chọn (${contentType}) — thiếu nội dung đặc trưng của pillar.`;
+
+    // 2. Education Depth Fail if < 40 words OR doesn't contain technical or educational keywords
+    const hasEduKeywords =
+      /(cấu tạo|sợi|thoáng khí|nhược điểm|đặc tính|độ cứng|chịu lực|khác biệt|sau đây|nguyên nhân|tại sao|nguyên lý|bảo quản|tuổi thọ|quy tắc)/.test(
+        lowercaseCaption,
+      );
+    const eduDepthStatus = wordCount >= 40 && hasEduKeywords ? "PASS" : "FAIL";
+    const eduDepthEvidence =
+      eduDepthStatus === "PASS"
+        ? `"${words.slice(0, 8).join(" ")}..." chứa chiều sâu kiến thức hữu ích với ${wordCount} từ.`
+        : "Bài viết dưới 40 từ hoặc chỉ nhận xét thẩm mỹ chung chung mà không mang lại kiến thức vật liệu.";
+
+    // 3. Material Authority Fail if contains marketing empty words without specific numbers or technical names
+    const hasAuthorityKeywords =
+      /(gsm|mohs|carrara|granite|vinyl|poly|%|độ dày|thông số|thực tế)/.test(
+        lowercaseCaption,
+      );
+    const hasVagueWords =
+      /(cao cấp|chất lượng tốt|premium|bền đẹp|tinh xảo|giá tốt nhất|hàng đầu)/.test(
+        lowercaseCaption,
+      );
+    const materialAuthorityStatus =
+      (hasAuthorityKeywords && !hasVagueWords) ||
+      (wordCount > 50 && hasAuthorityKeywords)
+        ? "PASS"
+        : "FAIL";
+    const materialAuthorityEvidence =
+      materialAuthorityStatus === "PASS"
+        ? `Trích dẫn chứa thông tin kiểm chứng: "${lowercaseCaption.match(/(gsm|mohs|carrara|granite|vinyl|poly|%|độ dày)/)?.[0] || "thông tin kỹ thuật"}"`
+        : "Sử dụng từ quảng cáo mơ hồ như 'cao cấp' hoặc 'chất lượng tốt' mà không có thông số kiểm chứng.";
+
+    // 4. Narrative Arc Fail if no clear structure or lack of takeaway
+    const hasParagraphs = caption.includes("\n");
+    const hasTakeaway =
+      /(fix|hãy|bạn nên|lưu ý|để đặt|hướng dẫn|áp dụng|takeaway)/.test(
+        lowercaseCaption,
+      );
+    const narrativeArcStatus = hasParagraphs && hasTakeaway ? "PASS" : "FAIL";
+    const narrativeArcEvidence =
+      narrativeArcStatus === "PASS"
+        ? "Nội dung có chia đoạn và câu takeaway kết luận rõ ràng."
+        : "Nội dung chỉ liệt kê thông số rời rạc hoặc viết liền một khối không có hook/takeaway rõ ràng.";
+
+    // 5. Tone — v4: CTA mềm ở cuối chấp nhận được, dấu ! chỉ FAIL khi đi cùng thúc ép
+    const emojiCount = (caption.match(/[\u{1F300}-\u{1F6FF}]/gu) || []).length;
+    const hasSalesWords =
+      /(siêu|ưu đãi|sale|giảm giá|đừng bỏ lỡ|inbox ngay|giá sốc|số lượng có hạn)/.test(
+        lowercaseCaption,
+      );
+    const hasExclamationWithPressure = /!/.test(caption) && hasSalesWords;
+    const toneStatus =
+      !hasExclamationWithPressure && emojiCount <= 5 && !hasSalesWords
+        ? "PASS"
+        : "FAIL";
+    const toneEvidence =
+      toneStatus === "PASS"
+        ? "Giọng văn tự tin, chuyên nghiệp, không sử dụng từ hối thúc hoặc ngôn ngữ thúc ép bán hàng."
+        : `Phát hiện lỗi giọng văn: ${hasSalesWords ? "từ bán hàng '" + (lowercaseCaption.match(/(siêu|ưu đãi|sale|giảm giá|inbox)/)?.[0] || "") + "'" : ""} ${emojiCount > 5 ? "emoji > 5" : ""} ${hasExclamationWithPressure ? "dấu '!' đi cùng âm điệu thúc ép" : ""}.`;
+
+    // 6. Visual-Text Alignment Auto PASS if no images
+    const visualStatus = !hasImages
+      ? "PASS"
+      : lowercaseCaption.includes("ảnh") || lowercaseCaption.includes("nhìn")
+        ? "FAIL"
+        : "PASS";
+    const visualEvidence = !hasImages
+      ? "Không có hình — auto PASS"
+      : visualStatus === "PASS"
+        ? "Nội dung bổ sung kiến thức kỹ thuật sâu sắc cho hình ảnh."
+        : "Caption chỉ mô tả lại những gì đã thấy trong hình ('nhìn thấy', 'như hình').";
+
+    const criteria: {
+      name: string;
+      status: "PASS" | "FAIL";
+      evidence: string;
+    }[] = [
+      {
+        name: "Pillar Fit",
+        status: pillarFitStatus,
+        evidence: pillarFitEvidence,
+      },
+      {
+        name: "Education Depth",
+        status: eduDepthStatus,
+        evidence: eduDepthEvidence,
+      },
+      {
+        name: "Material Authority",
+        status: materialAuthorityStatus,
+        evidence: materialAuthorityEvidence,
+      },
+      {
+        name: "Narrative Arc",
+        status: narrativeArcStatus,
+        evidence: narrativeArcEvidence,
+      },
+      { name: "Tone", status: toneStatus, evidence: toneEvidence },
+      {
+        name: "Visual-Text Alignment",
+        status: visualStatus,
+        evidence: visualEvidence,
+      },
+    ];
+
+    const failCount = criteria.filter((c) => c.status === "FAIL").length;
+    const verdict =
+      failCount === 0 ? "PASS" : failCount <= 2 ? "REVISION NEEDED" : "REJECT";
+
+    const verdict_summary =
+      verdict === "PASS"
+        ? "Nội dung hoàn hảo, đáp ứng xuất sắc toàn bộ 6 tiêu chí giáo dục và thẩm quyền vật liệu của Bonario."
+        : `Bài viết chưa đạt chuẩn thương hiệu do lỗi ở ${failCount} tiêu chí. Cần điều chỉnh lại.`;
+
+    const fixes: string[] = [];
+    if (pillarFitStatus === "FAIL")
+      fixes.push(
+        "Viết lại nội dung để phù hợp đúng pillar đã chọn — đảm bảo content làm đúng việc của pillar.",
+      );
+    if (eduDepthStatus === "FAIL")
+      fixes.push(
+        "Bổ sung ít nhất 1 thông số kỹ thuật hoặc hướng dẫn sử dụng/bảo quản cụ thể (>40 từ).",
+      );
+    if (materialAuthorityStatus === "FAIL")
+      fixes.push(
+        "Loại bỏ các từ marketing sáo rỗng (cao cấp, premium...) và thay bằng số liệu hoặc thuật ngữ kỹ thuật chính xác.",
+      );
+    if (narrativeArcStatus === "FAIL")
+      fixes.push(
+        "Thêm chia đoạn rõ ràng, bổ sung hook gây tò mò ở đầu và câu kết hành động/takeaway ở cuối.",
+      );
+    if (toneStatus === "FAIL")
+      fixes.push(
+        "Lược bỏ các từ ngữ bán hàng (siêu, ưu đãi, inbox ngay). Dấu chấm than chỉ chấp nhận ở CTA cuối caption nếu không đi cùng ngôn ngữ thúc ép.",
+      );
+    if (visualStatus === "FAIL" && hasImages)
+      fixes.push(
+        "Viết lại caption để giải thích đặc tính ẩn hoặc cơ sở khoa học đằng sau hình ảnh, tránh mô tả trực quan thô sơ.",
+      );
+
+    const suggested_revision = `Linen có cấu trúc sợi mở — thoáng khí hơn polyester 40%, cực kỳ thích hợp cho rèm phòng ngủ khí hậu nhiệt đới. Tuy nhiên, nhược điểm của linen là dễ nhăn hơn sợi tổng hợp, cần là định kỳ để giữ form dáng phẳng phiu.
+
+Hiểu rõ đặc tính này giúp bạn đưa ra lựa chọn vật liệu tối ưu cho không gian sống của mình.`;
+
+    return {
+      criteria,
+      verdict,
+      verdict_summary,
+      fixes,
+      suggested_revision,
+    };
+  }
+
+  // HEURISTICS FOR ORDINAIRE
+  else {
+    // 1. 5 Rules Compliance
+    const hasLongSentence = caption.length > 150 && !caption.includes("\n");
+    const rulesStatus = !hasLongSentence ? "PASS" : "FAIL";
+    const rulesEvidence =
+      rulesStatus === "PASS"
+        ? "Bố cục tối giản, phân đoạn rõ ràng và từ ngữ trang nhã đạt chuẩn."
+        : "Vi phạm quy tắc cấu trúc: Câu quá dài không ngắt nghỉ gây khó theo dõi.";
+
+    // 2. Tone Check
+    const hasExclamation = caption.includes("!");
+    const hasToneFails = /(sale|giảm giá|inbox ngay|mua ngay|liên hệ)/.test(
+      lowercaseCaption,
+    );
+    const toneStatus = !hasExclamation && !hasToneFails ? "PASS" : "FAIL";
+    const toneEvidence =
+      toneStatus === "PASS"
+        ? "Giọng văn dứt khoát, mang thẩm quyền định hình thị huớng."
+        : `Phát hiện lỗi tone: chứa dấu '!' hoặc cụm từ kêu gọi vồ vập.`;
+
+    // 3. Visual Standard
+    const visualStatus = !hasImages
+      ? "PASS"
+      : lowercaseCaption.includes("sặc sỡ") ||
+          lowercaseCaption.includes("diêm dúa")
+        ? "FAIL"
+        : "PASS";
+    const visualEvidence = !hasImages
+      ? "Không có hình — auto PASS"
+      : visualStatus === "PASS"
+        ? "Mô tả chất liệu hài hòa và sang trọng."
+        : "Mô tả không gian chứa từ ngữ diêm dúa lệch chuẩn Ordinaire.";
+
+    // 4. CTA Consistency
+    const hasAggressiveCTA =
+      /(inbox ngay|mua liền|đặt hàng ngay|sale off)/.test(lowercaseCaption);
+    const ctaStatus = !hasAggressiveCTA ? "PASS" : "FAIL";
+    const ctaEvidence =
+      ctaStatus === "PASS"
+        ? "CTA tinh tế, hướng dẫn trải nghiệm chuyên nghiệp."
+        : "Kêu gọi hành động quá trực diện, thúc giục mua hàng.";
+
+    // 5. Strategic Fit
+    const strategicStatus = wordCount > 25 ? "PASS" : "FAIL";
+    const strategicEvidence =
+      strategicStatus === "PASS"
+        ? `Nội dung hỗ trợ tốt cho mục tiêu '${serving}'.`
+        : "Bài viết quá ngắn để thể hiện giá trị chiến lược đã chọn.";
+
+    const criteria: {
+      name: string;
+      status: "PASS" | "FAIL";
+      evidence: string;
+    }[] = [
+      {
+        name: "5 Rules Compliance",
+        status: rulesStatus,
+        evidence: rulesEvidence,
+      },
+      { name: "Tone Check", status: toneStatus, evidence: toneEvidence },
+      {
+        name: "Visual Standard",
+        status: visualStatus,
+        evidence: visualEvidence,
+      },
+      { name: "CTA Consistency", status: ctaStatus, evidence: ctaEvidence },
+      {
+        name: "Strategic Fit",
+        status: strategicStatus,
+        evidence: strategicEvidence,
+      },
+    ];
+
+    const failCount = criteria.filter((c) => c.status === "FAIL").length;
+    const verdict =
+      failCount === 0 ? "PASS" : failCount <= 2 ? "REVISION NEEDED" : "REJECT";
+
+    const verdict_summary =
+      verdict === "PASS"
+        ? "Thiết kế nội dung hoàn toàn tối giản, thể hiện tính nhất quán và sang trọng đặc trưng của Ordinaire."
+        : `Bài viết cần cải thiện thêm để đạt chuẩn tối giản tinh tế của Ordinaire.`;
+
+    const fixes: string[] = [];
+    if (rulesStatus === "FAIL")
+      fixes.push(
+        "Ngắt câu ngắn gọn hơn, tránh viết chuỗi từ liên tục không phân tách.",
+      );
+    if (toneStatus === "FAIL")
+      fixes.push("Loại bỏ dấu '!' và các từ ngữ bán hàng đại trà.");
+    if (visualStatus === "FAIL")
+      fixes.push(
+        "Điều chỉnh lại mô tả thẩm mỹ sang hướng sang trọng, trung tính và tinh giản.",
+      );
+    if (ctaStatus === "FAIL")
+      fixes.push(
+        "Viết lại câu kết hướng tới sự trải nghiệm hoặc khám phá tự nhiên.",
+      );
+    if (strategicStatus === "FAIL")
+      fixes.push(
+        "Mở rộng thêm nội dung để làm rõ chiều sâu giá trị của dịch vụ/sản phẩm.",
+      );
+
+    const suggested_revision = `Chúng tôi loại bỏ các quyết định phức tạp để định hình gu thẩm mỹ tối giản cho không gian sống của bạn.
+
+Thiết kế từ Ordinaire tập trung vào tính nguyên bản của chất liệu và sự cân bằng trong bố cục hình khối.`;
+
+    return {
+      criteria,
+      verdict,
+      verdict_summary,
+      fixes,
+      suggested_revision,
+    };
+  }
+}
