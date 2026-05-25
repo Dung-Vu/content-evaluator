@@ -12,8 +12,8 @@ describe("Brand Configuration", () => {
     const bonario = getBrandConfig("bonario");
     expect(bonario.key).toBe("bonario");
     expect(bonario.name).toBe("Bonario Content Evaluator");
-    expect(bonario.criteria.length).toBe(6);
-    expect(bonario.criteria[0].name).toBe("Pillar Fit");
+    expect(bonario.criteria.length).toBe(5);
+    expect(bonario.criteria[0].name).toBe("Education Depth");
 
     const ordinaire = getBrandConfig("ordinaire");
     expect(ordinaire.key).toBe("ordinaire");
@@ -127,7 +127,6 @@ describe("Verdict Calculation", () => {
 
 describe("Response Normalization & Auto-Pass Logic", () => {
   const expectedCriteriaBonario = [
-    "Pillar Fit",
     "Education Depth",
     "Material Authority",
     "Narrative Arc",
@@ -142,14 +141,9 @@ describe("Response Normalization & Auto-Pass Logic", () => {
     "Strategic Fit",
   ];
 
-  it("should enforce auto-PASS for Visual-Text Alignment when no images are provided (6 criteria)", () => {
+  it("should enforce auto-PASS for Visual-Text Alignment when no images are provided (5 criteria)", () => {
     const mockClaudeOutput = {
       criteria: [
-        {
-          name: "Pillar Fit",
-          status: "PASS",
-          evidence: "content matches pillar",
-        },
         {
           name: "Education Depth",
           status: "PASS",
@@ -158,7 +152,6 @@ describe("Response Normalization & Auto-Pass Logic", () => {
         { name: "Material Authority", status: "PASS", evidence: "mohs info" },
         { name: "Narrative Arc", status: "PASS", evidence: "good intro/outro" },
         { name: "Tone", status: "PASS", evidence: "professional tone" },
-        // Claude initially flagged it as FAIL, or omitted it
         {
           name: "Visual-Text Alignment",
           status: "FAIL",
@@ -185,20 +178,15 @@ describe("Response Normalization & Auto-Pass Logic", () => {
     expect(visualCrit?.status).toBe("PASS");
     expect(visualCrit?.evidence).toBe("Không có hình — auto PASS");
 
-    // Verdict must be recalculated to PASS because now all 6 are PASS
+    // Verdict must be recalculated to PASS because now all 5 are PASS
     expect(normalized.verdict).toBe("PASS");
-    expect(normalized.criteria.length).toBe(6);
+    expect(normalized.criteria.length).toBe(5);
     expect(normalized.fixes.length).toBe(0); // Fixes should be cleared when verdict is PASS
   });
 
-  it("should keep FAIL status for Visual-Text Alignment when images are provided (6 criteria)", () => {
+  it("should keep FAIL status for Visual-Text Alignment when images are provided (5 criteria)", () => {
     const mockClaudeOutput = {
       criteria: [
-        {
-          name: "Pillar Fit",
-          status: "PASS",
-          evidence: "content matches pillar",
-        },
         {
           name: "Education Depth",
           status: "PASS",
@@ -213,7 +201,7 @@ describe("Response Normalization & Auto-Pass Logic", () => {
           evidence: "image doesn't match description",
         },
       ],
-      verdict: "PASS", // Claude wrongly calculated verdict
+      verdict: "PASS",
       verdict_summary: "Wrongly passed by model.",
       fixes: [],
       suggested_revision: "Linen is nice.",
@@ -230,13 +218,13 @@ describe("Response Normalization & Auto-Pass Logic", () => {
       (c) => c.name === "Visual-Text Alignment",
     );
     expect(visualCrit?.status).toBe("FAIL");
-    expect(normalized.criteria.length).toBe(6);
+    expect(normalized.criteria.length).toBe(5);
 
     // Verdict should be corrected to REVISION NEEDED (1 fail)
     expect(normalized.verdict).toBe("REVISION NEEDED");
   });
 
-  it("should handle completely malformed AI outputs and fallback gracefully (6 criteria)", () => {
+  it("should handle completely malformed AI outputs and fallback gracefully (5 criteria)", () => {
     const malformedOutput = {
       criteria: [
         {
@@ -255,13 +243,7 @@ describe("Response Normalization & Auto-Pass Logic", () => {
       false,
     );
 
-    expect(normalized.criteria.length).toBe(6);
-
-    const pillarFit = normalized.criteria.find((c) => c.name === "Pillar Fit");
-    expect(pillarFit?.status).toBe("PASS"); // Missing = default PASS
-    expect(pillarFit?.evidence).toBe(
-      "Không tìm thấy thông tin đánh giá từ mô hình.",
-    );
+    expect(normalized.criteria.length).toBe(5);
 
     const eduDepth = normalized.criteria.find(
       (c) => c.name === "Education Depth",
@@ -274,6 +256,12 @@ describe("Response Normalization & Auto-Pass Logic", () => {
     expect(toneCrit?.evidence).toBe(
       "Không tìm thấy thông tin đánh giá từ mô hình.",
     );
+
+    const visualCrit2 = normalized.criteria.find(
+      (c) => c.name === "Visual-Text Alignment",
+    );
+    expect(visualCrit2?.status).toBe("PASS");
+    expect(visualCrit2?.evidence).toBe("Không có hình — auto PASS");
 
     expect(normalized.verdict).toBe("PASS");
     expect(normalized.verdict_summary).toBe("Nội dung đạt chuẩn thương hiệu.");

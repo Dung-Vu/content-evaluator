@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { Upload, Trash2, X } from "lucide-react";
 import { BrandConfig } from "@/lib/brands";
 
@@ -13,9 +13,6 @@ interface ImageUploaderProps {
   images: ImageFile[];
   brandConfig: BrandConfig;
   brand: string;
-  theme: {
-    accentText: string;
-  };
   onImagesChange: (newImages: ImageFile[]) => void;
   onError: (error: { message: string; code?: string } | null) => void;
 }
@@ -95,7 +92,6 @@ export default function ImageUploader({
   images,
   brandConfig,
   brand,
-  theme,
   onImagesChange,
   onError,
 }: ImageUploaderProps) {
@@ -103,12 +99,21 @@ export default function ImageUploader({
   const [isDragging, setIsDragging] = useState(false);
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
 
-  // Handle Image Selection & Parallel Compression
-  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files) return;
+  // Revoke blob URLs on unmount or when images change
+  useEffect(() => {
+    const urls = images.map((img) => img.previewUrl);
+    return () => {
+      for (const url of urls) {
+        URL.revokeObjectURL(url);
+      }
+    };
+  }, [images]);
+
+  // Process files from input or drop event
+  const processFiles = async (files: FileList) => {
     onError(null);
 
-    const filesArray = Array.from(e.target.files);
+    const filesArray = Array.from(files);
 
     // Check total count limit
     if (images.length + filesArray.length > brandConfig.maxImages) {
@@ -120,9 +125,14 @@ export default function ImageUploader({
     }
 
     try {
-      // Validate all files
+      // Validate all files (check both MIME type and file extension fallback)
       for (const file of filesArray) {
-        if (!brandConfig.acceptedImageTypes.includes(file.type)) {
+        const isValidType =
+          brandConfig.acceptedImageTypes.includes(file.type) ||
+          brandConfig.acceptedImageTypes.some((mime) =>
+            file.name.toLowerCase().endsWith(mime.replace("image/", ".")),
+          );
+        if (!isValidType) {
           onError({
             message: `Định dạng '${file.name}' không hợp lệ. Chỉ chấp nhận JPG, PNG, WEBP.`,
             code: "UNSUPPORTED_IMAGE_TYPE",
@@ -140,35 +150,44 @@ export default function ImageUploader({
         }
       }
 
-      // Parallel compression using Promise.all
-      const compressedResults = await Promise.all(
-        filesArray.map(async (file) => {
-          try {
-            const compressedFile = await compressImage(file);
-            return {
-              file: compressedFile,
-              previewUrl: URL.createObjectURL(compressedFile),
-            };
-          } catch (err) {
-            console.error("Compression failed, using original file:", err);
-            return {
-              file,
-              previewUrl: URL.createObjectURL(file),
-            };
-          }
-        }),
-      );
+      // Batch compression with concurrency limit (max 3 at a time to avoid UI freeze)
+      const CONCURRENCY_LIMIT = 3;
+      const compressedResults: ImageFile[] = [];
+      for (let i = 0; i < filesArray.length; i += CONCURRENCY_LIMIT) {
+        const batch = filesArray.slice(i, i + CONCURRENCY_LIMIT);
+        const batchResults = await Promise.all(
+          batch.map(async (file) => {
+            try {
+              const compressedFile = await compressImage(file);
+              return {
+                file: compressedFile,
+                previewUrl: URL.createObjectURL(compressedFile),
+              };
+            } catch (err) {
+              console.error("Compression failed, using original file:", err);
+              return {
+                file,
+                previewUrl: URL.createObjectURL(file),
+              };
+            }
+          }),
+        );
+        compressedResults.push(...batchResults);
+      }
 
       onImagesChange([...images, ...compressedResults]);
     } catch (err) {
       console.error("Error processing images:", err);
       onError({ message: "Có lỗi xảy ra khi tải ảnh lên." });
     }
+  };
 
-    // Reset input value
-    if (e.target.value) {
-      e.target.value = "";
-    }
+  // Handle Image Selection (input change event)
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    processFiles(e.target.files).then(() => {
+      if (e.target.value) e.target.value = "";
+    });
   };
 
   // Remove Image
@@ -182,18 +201,18 @@ export default function ImageUploader({
   // Drag and Drop styling
   const dragBorderClass = isDragging
     ? brand === "bonario"
-      ? "border-amber-500 bg-slate-900/60 shadow-[0_0_15px_rgba(245,158,11,0.15)]"
-      : "border-indigo-500 bg-slate-900/60 shadow-[0_0_15px_rgba(99,102,241,0.15)]"
-    : "border-slate-800";
+      ? "border-amber-500/50 bg-slate-900/65 shadow-[0_0_20px_rgba(245,158,11,0.2)] glow-border"
+      : "border-indigo-500/50 bg-slate-900/65 shadow-[0_0_20px_rgba(99,102,241,0.2)] glow-border"
+    : "border-slate-800 hover:border-slate-700";
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex justify-between items-center">
         <label className="text-xs font-bold text-slate-300 tracking-wide">
-          Đính kèm hình ảnh thiết kế (Layout) — Tùy chọn
+          Đính kèm layout thiết kế (Tùy chọn)
         </label>
-        <span className="text-[9px] text-slate-550 font-medium">
-          Hỗ trợ tệp PNG, JPG, WEBP tối đa {brandConfig.maxImages} ảnh (Max{" "}
+        <span className="text-[9px] text-slate-500 font-medium">
+          PNG, JPG, WEBP • Tối đa {brandConfig.maxImages} ảnh (Mỗi ảnh &le;{" "}
           {brandConfig.maxImageSizeMb}MB)
         </span>
       </div>
@@ -212,16 +231,10 @@ export default function ImageUploader({
           e.preventDefault();
           setIsDragging(false);
           if (e.dataTransfer.files) {
-            const fakeEvent = {
-              target: {
-                files: e.dataTransfer.files,
-                value: "",
-              },
-            } as unknown as React.ChangeEvent<HTMLInputElement>;
-            await handleImageChange(fakeEvent);
+            await processFiles(e.dataTransfer.files);
           }
         }}
-        className={`bg-slate-950/40 border-2 border-dashed ${dragBorderClass} hover:border-${brand === "bonario" ? "amber-500/40" : "indigo-500/40"} hover:bg-slate-950/60 rounded-xl p-6 text-center cursor-pointer transition-all duration-300 flex flex-col items-center justify-center gap-2 group relative overflow-hidden`}
+        className={`bg-slate-950/40 border-2 border-dashed ${dragBorderClass} ${brand === "bonario" ? "hover:border-amber-500/40" : "hover:border-indigo-500/40"} hover:bg-slate-950/60 rounded-xl p-6 text-center cursor-pointer transition-all duration-300 flex flex-col items-center justify-center gap-2 group relative overflow-hidden`}
       >
         <input
           type="file"
@@ -232,15 +245,15 @@ export default function ImageUploader({
           className="hidden"
         />
         <div
-          className={`p-3 bg-slate-950/80 border border-slate-800 text-slate-400 group-hover:${theme.accentText} group-hover:border-${brand === "bonario" ? "amber-500/30" : "indigo-500/30"} transition-all shadow-inner rounded-xl`}
+          className={`p-3 bg-slate-950/80 border border-slate-800 text-slate-400 ${brand === "bonario" ? "group-hover:text-amber-400 group-hover:border-amber-500/30" : "group-hover:text-indigo-400 group-hover:border-indigo-500/30"} transition-all shadow-inner rounded-xl`}
         >
           <Upload className="w-5 h-5" />
         </div>
         <p className="text-xs font-bold text-slate-200 mt-1">
-          Nhấp hoặc kéo thả tệp layout thiết kế vào đây
+          Nhấp hoặc thả layout thiết kế vào đây
         </p>
         <p className="text-[9px] text-slate-550 max-w-[280px] leading-normal">
-          Hỗ trợ mô hình đa phương thức chấm điểm tương đồng visual.
+          Hỗ trợ đối chiếu văn bản và hình ảnh thực tế.
         </p>
       </div>
 
@@ -254,7 +267,7 @@ export default function ImageUploader({
                 e.stopPropagation();
                 setActivePreviewUrl(img.previewUrl);
               }}
-              className="relative aspect-square bg-slate-900 rounded-lg overflow-hidden border border-slate-800 group shadow-inner cursor-pointer hover:border-slate-650 transition-all duration-200"
+              className="relative aspect-square bg-slate-900 rounded-lg overflow-hidden border border-slate-800 group shadow-inner cursor-pointer hover:border-slate-600 transition-all duration-200"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img

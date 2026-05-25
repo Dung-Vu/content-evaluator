@@ -30,7 +30,7 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="vi"
       className={`${sansFont.variable} ${displayFont.variable} ${monoFont.variable} h-full antialiased`}
       suppressHydrationWarning
     >

@@ -82,9 +82,21 @@ class MemoryRateLimiter implements RateLimiter {
   }
 }
 
-// Global singleton instance
-const globalLimit = process.env.RATE_LIMIT_PER_MINUTE
-  ? parseInt(process.env.RATE_LIMIT_PER_MINUTE, 10)
-  : 20;
+// Global singleton instance (lazy-initialized)
+let _instance: MemoryRateLimiter | null = null;
 
-export const memoryRateLimiter = new MemoryRateLimiter(globalLimit, 60);
+export function getRateLimiter(): MemoryRateLimiter {
+  if (!_instance) {
+    const limit = process.env.RATE_LIMIT_PER_MINUTE
+      ? parseInt(process.env.RATE_LIMIT_PER_MINUTE, 10)
+      : 20;
+    _instance = new MemoryRateLimiter(limit, 60);
+  }
+  return _instance;
+}
+
+export const memoryRateLimiter = new Proxy({} as MemoryRateLimiter, {
+  get(_, prop: keyof MemoryRateLimiter) {
+    return getRateLimiter()[prop];
+  },
+});

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Sparkles, FileText, RefreshCw, AlertTriangle, X } from "lucide-react";
 import { BrandKey, getBrandConfig } from "@/lib/brands";
 import BrandSwitcher from "@/components/BrandSwitcher";
+import CustomSelect from "@/components/CustomSelect";
 import ImageUploader, { ImageFile } from "@/components/ImageUploader";
 import ResultPanel, {
   StreamEvaluationResponse,
@@ -148,7 +149,7 @@ const BRAND_THEMES = {
     scoreStroke: "text-amber-500",
     cardHover: "hover:border-amber-500/20 hover:bg-slate-900/60",
     panelStyle: "glass-panel-bonario",
-    hoverStyle: "premium-hover-bonario",
+    hoverStyle: "premium-hover",
   },
   ordinaire: {
     key: "ordinaire" as const,
@@ -170,7 +171,7 @@ const BRAND_THEMES = {
     scoreStroke: "text-indigo-500",
     cardHover: "hover:border-indigo-500/20 hover:bg-slate-900/60",
     panelStyle: "glass-panel-ordinaire",
-    hoverStyle: "premium-hover-ordinaire",
+    hoverStyle: "premium-hover",
   },
 };
 
@@ -196,9 +197,17 @@ export default function Home() {
   } | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
 
+  const abortControllerRef = useRef<AbortController | null>(null);
+
+  const wordCount = useMemo(
+    () => caption.trim().split(/\s+/).filter(Boolean).length,
+    [caption],
+  );
+
   // Switch brand and clear dependent states
   const handleBrandChange = (newBrand: BrandKey) => {
     if (newBrand === brand) return;
+    abortControllerRef.current?.abort();
     setBrand(newBrand);
     setCaption("");
     setContentType("");
@@ -254,9 +263,12 @@ export default function Home() {
     });
 
     try {
+      const abortController = new AbortController();
+      abortControllerRef.current = abortController;
       const response = await fetch("/api/evaluate", {
         method: "POST",
         body: formData,
+        signal: abortController.signal,
       });
 
       if (!response.ok) {
@@ -308,6 +320,7 @@ export default function Home() {
         setIsSubmitting(false); // Hide full page spinner, let stream show progress!
 
         try {
+          let streamDone = false;
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
@@ -324,6 +337,7 @@ export default function Home() {
               if (cleanLine.startsWith("data: ")) {
                 const dataStr = cleanLine.slice(6);
                 if (dataStr === "[DONE]") {
+                  streamDone = true;
                   break;
                 }
                 try {
@@ -331,7 +345,6 @@ export default function Home() {
                   const content = parsed.choices?.[0]?.delta?.content || "";
                   accumulatedText += content;
 
-                  // Parse partial state and update React state
                   const updatedState = extractPartialState(
                     accumulatedText,
                     brandCriteriaNames,
@@ -343,9 +356,11 @@ export default function Home() {
                 }
               }
             }
+            if (streamDone) break;
           }
         } finally {
           reader.releaseLock();
+          abortControllerRef.current = null;
         }
       } else {
         // Fallback for standard JSON response
@@ -369,7 +384,7 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-[#030712] text-slate-100 flex flex-col font-sans select-none overflow-x-hidden antialiased">
+    <div className="min-h-screen bg-[#030712] text-slate-100 flex flex-col font-sans overflow-x-hidden antialiased" data-brand={brand}>
       {/* Decorative Grid Backdrop */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#0f172a33_1px,transparent_1px),linear-gradient(to_bottom,#0f172a33_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none z-0 opacity-40 animate-grid-drift" />
 
@@ -450,11 +465,11 @@ export default function Home() {
                   <FileText
                     className={`w-4.5 h-4.5 ${theme.accentText} transition-colors duration-1000`}
                   />
-                  Dữ Liệu Phân Tích & Kiểm Định
+                  Dữ Liệu Kiểm Định
                 </h2>
                 <p className="text-xs text-slate-400 mt-1">
-                  Nhập nội dung bài viết (Caption) và đính kèm hình ảnh thiết kế
-                  để kiểm định tính nhất quán chuẩn thương hiệu.
+                  Nhập caption và đính kèm layout để đánh giá tính nhất quán
+                  thương hiệu.
                 </p>
               </div>
               <span
@@ -472,12 +487,12 @@ export default function Home() {
                     htmlFor="caption"
                     className="text-xs font-bold text-slate-300 tracking-wide"
                   >
-                    Nội dung văn bản (Caption)
+                    Caption bài viết
                   </label>
                   <span
-                    className={`text-[10px] font-mono font-medium ${caption.trim().split(/\s+/).filter(Boolean).length >= 40 ? theme.accentText : "text-slate-550"} transition-colors duration-1000`}
+                    className={`text-[10px] font-mono font-medium ${wordCount >= 40 ? theme.accentText : "text-slate-500"} transition-colors duration-1000`}
                   >
-                    {caption.trim().split(/\s+/).filter(Boolean).length} từ
+                    {wordCount} từ
                   </span>
                 </div>
                 <textarea
@@ -493,14 +508,14 @@ export default function Home() {
                     setCaption(e.target.value);
                     setValidationError(null);
                   }}
-                  className={`w-full glass-input text-sm text-slate-200 rounded-xl px-4 py-3 placeholder-slate-550 focus:outline-none ${theme.ringFocus} resize-none`}
+                  className={`w-full glass-input text-sm text-slate-200 rounded-xl px-4 py-3 placeholder-slate-500 focus:outline-none ${theme.ringFocus} resize-none`}
                 />
                 {brand === "bonario" &&
                   caption.trim().length > 0 &&
-                  caption.trim().split(/\s+/).filter(Boolean).length < 40 && (
-                    <span className="text-[10px] text-amber-550/80 font-medium tracking-wide animate-in fade-in duration-200 mt-1">
-                      ⚠️ Khuyến nghị viết từ 40 từ trở lên để đáp ứng tiêu chuẩn
-                      chiều sâu kiến thức vật liệu của Bonario.
+                  wordCount < 40 && (
+                    <span className="text-[10px] text-amber-500/80 font-medium tracking-wide animate-in fade-in duration-200 mt-1">
+                      ⚠️ Khuyến nghị viết ≥ 40 từ để đạt chiều sâu vật liệu của
+                      Bonario.
                     </span>
                   )}
               </div>
@@ -515,28 +530,17 @@ export default function Home() {
                   >
                     {brandConfig.contentTypeLabel}
                   </label>
-                  <select
+                  <CustomSelect
                     id="contentType"
                     value={contentType}
-                    onChange={(e) => {
-                      setContentType(e.target.value);
+                    onChange={(val) => {
+                      setContentType(val);
                       setValidationError(null);
                     }}
-                    className={`w-full glass-input text-xs text-slate-200 rounded-xl px-4 py-3 focus:outline-none ${theme.ringFocus} cursor-pointer`}
-                  >
-                    <option value="" disabled>
-                      -- Chọn phân loại --
-                    </option>
-                    {brandConfig.contentTypeOptions.map((opt) => (
-                      <option
-                        key={opt.value}
-                        value={opt.value}
-                        className="bg-slate-950"
-                      >
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
+                    options={brandConfig.contentTypeOptions}
+                    placeholder="-- Chọn phân loại --"
+                    brand={brand}
+                  />
                 </div>
 
                 {/* Serving Goal */}
@@ -547,28 +551,17 @@ export default function Home() {
                   >
                     {brandConfig.servingLabel}
                   </label>
-                  <select
+                  <CustomSelect
                     id="serving"
                     value={serving}
-                    onChange={(e) => {
-                      setServing(e.target.value);
+                    onChange={(val) => {
+                      setServing(val);
                       setValidationError(null);
                     }}
-                    className={`w-full glass-input text-xs text-slate-200 rounded-xl px-4 py-3 focus:outline-none ${theme.ringFocus} cursor-pointer`}
-                  >
-                    <option value="" disabled>
-                      -- Chọn mục tiêu --
-                    </option>
-                    {brandConfig.servingOptions.map((opt) => (
-                      <option
-                        key={opt.value}
-                        value={opt.value}
-                        className="bg-slate-950"
-                      >
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
+                    options={brandConfig.servingOptions}
+                    placeholder="-- Chọn mục tiêu --"
+                    brand={brand}
+                  />
                 </div>
               </div>
 
@@ -577,7 +570,6 @@ export default function Home() {
                 images={images}
                 brandConfig={brandConfig}
                 brand={brand}
-                theme={theme}
                 onImagesChange={setImages}
                 onError={setErrorToast}
               />
@@ -594,23 +586,23 @@ export default function Home() {
               <button
                 type="submit"
                 disabled={isSubmitting || isStreaming}
-                className={`w-full mt-2 bg-gradient-to-r ${theme.primaryColor} disabled:from-slate-800 disabled:to-slate-800 text-white text-xs font-bold py-3.5 px-4 rounded-xl shadow-lg hover:shadow-${brand === "bonario" ? "amber" : "indigo"}-500/10 active:scale-[0.99] transition-all duration-500 flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed`}
+                className={`w-full mt-2 bg-gradient-to-r ${theme.primaryColor} disabled:from-slate-800 disabled:to-slate-800 text-white text-xs font-bold py-3.5 px-4 rounded-xl shadow-lg ${brand === "bonario" ? "hover:shadow-amber-500/10" : "hover:shadow-indigo-500/10"} active:scale-[0.99] transition-all duration-500 flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed`}
               >
                 {isSubmitting ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                    <span>ĐANG KHỞI TẠO TIẾN TRÌNH...</span>
+                    <span>ĐANG KHỞI TẠO...</span>
                   </>
                 ) : isStreaming ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin text-white" />
-                    <span>ĐANG CHẤM ĐIỂM (STREAMING)...</span>
+                    <span>ĐANG ĐÁNH GIÁ...</span>
                   </>
                 ) : (
                   <>
                     <Sparkles className="w-4 h-4 text-white" />
                     <span className="tracking-wider uppercase">
-                      ĐÁNH GIÁ CHẤT LƯỢNG CONTENT
+                      BẮT ĐẦU KIỂM ĐỊNH
                     </span>
                   </>
                 )}
@@ -637,8 +629,7 @@ export default function Home() {
       {/* FOOTER */}
       <footer className="relative z-10 border-t border-slate-900/60 py-6 text-center bg-slate-950/30">
         <p className="text-[9px] text-slate-500 font-bold tracking-widest uppercase font-display">
-          Content Evaluator App &bull; Powered by Qwen 3.6 (Bailian AI) &bull;
-          Designed for Bonario Group
+          Content Evaluator &bull; Powered by Qwen 3.6 &bull; Bonario Group
         </p>
       </footer>
     </div>

@@ -4,6 +4,57 @@ import {
   normalizeAndValidateResponse,
 } from "../validation/evaluate-response";
 
+type MessageContentPart =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
+function buildUserContent(
+  caption: string,
+  contentType: string,
+  serving: string,
+  images: { base64: string; mimeType: string }[],
+): MessageContentPart[] {
+  const contentArray: MessageContentPart[] = [
+    {
+      type: "text",
+      text: `Caption/Nội dung để chấm điểm:
+###USER_CAPTION_START###
+${caption}
+###USER_CAPTION_END###
+
+Metadata:
+- Loại content: ${contentType}
+- Phục vụ: ${serving}
+- Số lượng ảnh: ${images.length}`,
+    },
+  ];
+
+  for (const img of images) {
+    contentArray.push({
+      type: "image_url",
+      image_url: {
+        url: `data:${img.mimeType};base64,${img.base64}`,
+      },
+    });
+  }
+
+  return contentArray;
+}
+
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs = 120_000,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Main evaluation function. Calls Aliyun DashScope (Bailian) API if API key is present.
  * Otherwise, falls back to a smart mock evaluator for local development and testing.
@@ -25,7 +76,6 @@ export async function evaluateContent(
     "https://coding-intl.dashscope.aliyuncs.com/v1";
   const model = process.env.BAILIAN_MODEL || "qwen3.6-plus";
 
-  // --- MOCK FALLBACK (If Bailian API Key is missing) ---
   if (!apiKey || apiKey.trim() === "") {
     console.warn("BAILIAN_API_KEY is not set. Falling back to Mock Evaluator.");
     return runMockEvaluator(
@@ -37,38 +87,10 @@ export async function evaluateContent(
     );
   }
 
-  type MessageContentPart =
-    | { type: "text"; text: string }
-    | { type: "image_url"; image_url: { url: string } };
-
-  // Construct messages content array in OpenAI multimodal format
-  const contentArray: MessageContentPart[] = [
-    {
-      type: "text",
-      text: `Caption/Nội dung để chấm điểm:
-"""
-${caption}
-"""
-
-Metadata:
-- Loại content: ${contentType}
-- Phục vụ: ${serving}
-- Số lượng ảnh: ${images.length}`,
-    },
-  ];
-
-  // Map images to OpenAI image blocks
-  for (const img of images) {
-    contentArray.push({
-      type: "image_url",
-      image_url: {
-        url: `data:${img.mimeType};base64,${img.base64}`,
-      },
-    });
-  }
+  const contentArray = buildUserContent(caption, contentType, serving, images);
 
   try {
-    const response = await fetch(`${baseUrl}/chat/completions`, {
+    const response = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -170,53 +192,19 @@ export async function evaluateContentStream(
     const encoder = new TextEncoder();
     return new ReadableStream({
       async start(controller) {
-        // Stream mock JSON chunk by chunk with brief delay to mimic AI streaming
-        const chunks = [
-          `data: ${JSON.stringify({ choices: [{ delta: { content: "```json\n" } }] })}\n\n`,
-          `data: ${JSON.stringify({ choices: [{ delta: { content: mockJson } }] })}\n\n`,
-          `data: ${JSON.stringify({ choices: [{ delta: { content: "\n```" } }] })}\n\n`,
-          "data: [DONE]\n\n",
-        ];
-
-        for (const chunk of chunks) {
-          controller.enqueue(encoder.encode(chunk));
-          // Sleep for a tiny bit so the UI has a nice transition feel
-          await new Promise((resolve) => setTimeout(resolve, 80));
-        }
+        // Stream mock JSON as raw chunks (no markdown fence so client regex works)
+        const chunk = `data: ${JSON.stringify({ choices: [{ delta: { content: mockJson } }] })}\n\n`;
+        controller.enqueue(encoder.encode(chunk));
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         controller.close();
       },
     });
   }
 
-  type MessageContentPart =
-    | { type: "text"; text: string }
-    | { type: "image_url"; image_url: { url: string } };
+  const contentArray = buildUserContent(caption, contentType, serving, images);
 
-  const contentArray: MessageContentPart[] = [
-    {
-      type: "text",
-      text: `Caption/Nội dung để chấm điểm:
-"""
-${caption}
-"""
-
-Metadata:
-- Loại content: ${contentType}
-- Phục vụ: ${serving}
-- Số lượng ảnh: ${images.length}`,
-    },
-  ];
-
-  for (const img of images) {
-    contentArray.push({
-      type: "image_url",
-      image_url: {
-        url: `data:${img.mimeType};base64,${img.base64}`,
-      },
-    });
-  }
-
-  const response = await fetch(`${baseUrl}/chat/completions`, {
+  const response = await fetchWithTimeout(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -275,35 +263,7 @@ function runMockEvaluator(
 
   // HEURISTICS FOR BONARIO
   if (brandKey === "bonario") {
-    // 1. Pillar Fit — Check if content matches the selected pillar
-    const isPillar1 = contentType.startsWith("Pillar 1");
-    const isPillar2 = contentType.startsWith("Pillar 2");
-    const isPillar3 = contentType.startsWith("Pillar 3");
-    const hasDecodedKeywords =
-      /(cấu tạo|sợi|thành phần|bảo quản|đặc tính|cấu trúc|vật liệu)/.test(
-        lowercaseCaption,
-      );
-    const hasDesignKeywords =
-      /(logic|lý do|chọn|designer|thiết kế|không gian|phối hợp)/.test(
-        lowercaseCaption,
-      );
-    const hasRealHomesKeywords =
-      /(dự án|công trình|thực tế|case study|phân tích|không gian thực)/.test(
-        lowercaseCaption,
-      );
-    const pillarFitStatus =
-      (isPillar1 && hasDecodedKeywords) ||
-      (isPillar2 && hasDesignKeywords) ||
-      (isPillar3 && hasRealHomesKeywords) ||
-      (!isPillar1 && !isPillar2 && !isPillar3)
-        ? "PASS"
-        : "FAIL";
-    const pillarFitEvidence =
-      pillarFitStatus === "PASS"
-        ? `Content phù hợp với pillar đã chọn (${contentType}).`
-        : `Content không phù hợp với pillar đã chọn (${contentType}) — thiếu nội dung đặc trưng của pillar.`;
-
-    // 2. Education Depth Fail if < 40 words OR doesn't contain technical or educational keywords
+    // 1. Education Depth Fail if < 40 words OR doesn't contain technical or educational keywords
     const hasEduKeywords =
       /(cấu tạo|sợi|thoáng khí|nhược điểm|đặc tính|độ cứng|chịu lực|khác biệt|sau đây|nguyên nhân|tại sao|nguyên lý|bảo quản|tuổi thọ|quy tắc)/.test(
         lowercaseCaption,
@@ -314,7 +274,7 @@ function runMockEvaluator(
         ? `"${words.slice(0, 8).join(" ")}..." chứa chiều sâu kiến thức hữu ích với ${wordCount} từ.`
         : "Bài viết dưới 40 từ hoặc chỉ nhận xét thẩm mỹ chung chung mà không mang lại kiến thức vật liệu.";
 
-    // 3. Material Authority Fail if contains marketing empty words without specific numbers or technical names
+    // 2. Material Authority Fail if contains marketing empty words without specific numbers or technical names
     const hasAuthorityKeywords =
       /(gsm|mohs|carrara|granite|vinyl|poly|%|độ dày|thông số|thực tế)/.test(
         lowercaseCaption,
@@ -333,7 +293,7 @@ function runMockEvaluator(
         ? `Trích dẫn chứa thông tin kiểm chứng: "${lowercaseCaption.match(/(gsm|mohs|carrara|granite|vinyl|poly|%|độ dày)/)?.[0] || "thông tin kỹ thuật"}"`
         : "Sử dụng từ quảng cáo mơ hồ như 'cao cấp' hoặc 'chất lượng tốt' mà không có thông số kiểm chứng.";
 
-    // 4. Narrative Arc Fail if no clear structure or lack of takeaway
+    // 3. Narrative Arc Fail if no clear structure or lack of takeaway
     const hasParagraphs = caption.includes("\n");
     const hasTakeaway =
       /(fix|hãy|bạn nên|lưu ý|để đặt|hướng dẫn|áp dụng|takeaway)/.test(
@@ -345,7 +305,7 @@ function runMockEvaluator(
         ? "Nội dung có chia đoạn và câu takeaway kết luận rõ ràng."
         : "Nội dung chỉ liệt kê thông số rời rạc hoặc viết liền một khối không có hook/takeaway rõ ràng.";
 
-    // 5. Tone — v4: CTA mềm ở cuối chấp nhận được, dấu ! chỉ FAIL khi đi cùng thúc ép
+    // 4. Tone — v4: CTA mềm ở cuối chấp nhận được, dấu ! chỉ FAIL khi đi cùng thúc ép
     const emojiCount = (caption.match(/[\u{1F300}-\u{1F6FF}]/gu) || []).length;
     const hasSalesWords =
       /(siêu|ưu đãi|sale|giảm giá|đừng bỏ lỡ|inbox ngay|giá sốc|số lượng có hạn)/.test(
@@ -361,7 +321,7 @@ function runMockEvaluator(
         ? "Giọng văn tự tin, chuyên nghiệp, không sử dụng từ hối thúc hoặc ngôn ngữ thúc ép bán hàng."
         : `Phát hiện lỗi giọng văn: ${hasSalesWords ? "từ bán hàng '" + (lowercaseCaption.match(/(siêu|ưu đãi|sale|giảm giá|inbox)/)?.[0] || "") + "'" : ""} ${emojiCount > 5 ? "emoji > 5" : ""} ${hasExclamationWithPressure ? "dấu '!' đi cùng âm điệu thúc ép" : ""}.`;
 
-    // 6. Visual-Text Alignment Auto PASS if no images
+    // 5. Visual-Text Alignment Auto PASS if no images
     const visualStatus = !hasImages
       ? "PASS"
       : lowercaseCaption.includes("ảnh") || lowercaseCaption.includes("nhìn")
@@ -378,11 +338,6 @@ function runMockEvaluator(
       status: "PASS" | "FAIL";
       evidence: string;
     }[] = [
-      {
-        name: "Pillar Fit",
-        status: pillarFitStatus,
-        evidence: pillarFitEvidence,
-      },
       {
         name: "Education Depth",
         status: eduDepthStatus,
@@ -412,14 +367,10 @@ function runMockEvaluator(
 
     const verdict_summary =
       verdict === "PASS"
-        ? "Nội dung hoàn hảo, đáp ứng xuất sắc toàn bộ 6 tiêu chí giáo dục và thẩm quyền vật liệu của Bonario."
+        ? "Nội dung hoàn hảo, đáp ứng xuất sắc toàn bộ 5 tiêu chí giáo dục và thẩm quyền vật liệu của Bonario."
         : `Bài viết chưa đạt chuẩn thương hiệu do lỗi ở ${failCount} tiêu chí. Cần điều chỉnh lại.`;
 
     const fixes: string[] = [];
-    if (pillarFitStatus === "FAIL")
-      fixes.push(
-        "Viết lại nội dung để phù hợp đúng pillar đã chọn — đảm bảo content làm đúng việc của pillar.",
-      );
     if (eduDepthStatus === "FAIL")
       fixes.push(
         "Bổ sung ít nhất 1 thông số kỹ thuật hoặc hướng dẫn sử dụng/bảo quản cụ thể (>40 từ).",

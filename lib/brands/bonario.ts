@@ -20,10 +20,6 @@ export const bonarioConfig: BrandConfig = {
         "Library Video FAQ: Giải đáp các câu hỏi thường gặp qua video ngắn. Series Edu Content: Đi sâu vào nguồn gốc và đặc tính vật liệu",
     },
     {
-      value: "Pillar 1 - Trends",
-      label: "Cập nhật và dự báo các xu hướng vật liệu mới nhất trong ngành.",
-    },
-    {
       value: "Pillar 2 - Application",
       label:
         "Cách ứng dụng vật liệu vào công trình, chuyên sâu hạng mục rèm cửa và vật liệu dán tường",
@@ -32,11 +28,6 @@ export const bonarioConfig: BrandConfig = {
       value: "Pillar 2 - Design Logic",
       label:
         "Đằng sau những lựa chọn vật liệu có tính chủ đích để tạo nên không gian có gu",
-    },
-    {
-      value: "Pillar 2 - Showroom & Partner",
-      label:
-        "Showroom Tour, Recap các hoạt động tại showroom, kết nối với các đối tác thiết kế",
     },
     {
       value: "Pillar 3 - Case Study",
@@ -53,23 +44,23 @@ export const bonarioConfig: BrandConfig = {
       label:
         "Định vị thương hiệu là chuyên gia đáng tin cậy trong ngành vật liệu trang trí nội thất",
     },
+    {
+      value: "Trend Forecasting",
+      label: "Cập nhật và dự báo các xu hướng vật liệu mới nhất trong ngành",
+    },
     { value: "Network", label: "Xây dựng mạng lưới kết nối chuyên nghiệp." },
     {
       value: "Trust & Conversion",
       label:
         "Tạo độ uy tín của thương hiệu và tăng sự tự tin trong hành trình chọn vật liệu và mua hàng của khách thông qua câu chuyện và hình ảnh thực tế",
     },
+    {
+      value: "Education & Guidance",
+      label:
+        "Giáo dục và hướng dẫn khách hàng — giải đáp băn khoăn, cung cấp kiến thức chuyên sâu về vật liệu",
+    },
   ],
   criteria: [
-    {
-      name: "Pillar Fit",
-      question:
-        "Content có phù hợp đúng pillar content và mục tiêu của pillar đó hay không?",
-      passDesc:
-        "Content làm đúng việc của pillar: Giải mã = truyền kiến thức vật liệu cụ thể; Designer Thinking = chia sẻ logic/lý do chọn vật liệu; Real Homes = phân tích vật liệu trong không gian thực.",
-      failDesc:
-        "Content nói chuyện khác với pillar đã chọn — FAQ nhưng không trả lời câu hỏi cụ thể, Showcase nhưng không có thông tin vật liệu.",
-    },
     {
       name: "Education Depth",
       question:
@@ -132,15 +123,9 @@ Thông tin content đang được review:
 - Phục vụ: ${serving}
 (Dùng thông tin này để hiệu chỉnh kỳ vọng về độ dài, cấu trúc, và mức độ chi tiết phù hợp.)
 
-6 tiêu chí — chấm PASS hoặc FAIL:
+5 tiêu chí — chấm PASS hoặc FAIL:
 
-1. Pillar Fit
-   PASS: Content làm đúng việc của pillar đó: Giải mã = truyền kiến thức vật liệu cụ thể;
-         Designer Thinking = chia sẻ logic/lý do chọn vật liệu; Real Homes = phân tích vật liệu trong không gian thực.
-   FAIL: Content nói chuyện khác với pillar đã chọn — FAQ nhưng không trả lời câu hỏi cụ thể,
-         Showcase nhưng không có thông tin vật liệu.
-
-2. Education Depth
+1. Education Depth
    PASS: Có ≥1 trong 3 dạng:
          (A) Đặc tính kỹ thuật & Bảo quản — cấu tạo, độ bền, phản ứng với môi trường; hoặc hướng dẫn dùng, làm sạch, tuổi thọ.
          (B) Ứng dụng vào không gian — lý do chọn vật liệu theo loại phòng, kích thước, chức năng; cần có lý do, không chỉ gắn nhãn phong cách.
@@ -148,18 +133,18 @@ Thông tin content đang được review:
          Lưu ý: Cảm nhận thẩm mỹ thuần túy ("thư thái", "tinh tế", "sang trọng") không tính vào bất kỳ dạng PASS nào. Dạng C chỉ hợp lệ khi có nguyên tắc hoặc lý do.
    FAIL: Không có dạng nào — toàn bộ content chỉ là cảm nhận thẩm mỹ. Hoặc content dưới 40 từ.
 
-3. Material Authority
+2. Material Authority
    PASS: Có ≥1 trong: số liệu (GSM, độ cứng Mohs, nhiệt độ, năm...), tên kỹ thuật chính xác,
          mô tả hành vi vật liệu có thể kiểm chứng.
    FAIL: Chỉ có "cao cấp", "chất lượng tốt", "premium", "bền đẹp", "tinh xảo"
          mà không có bằng chứng cụ thể nào.
 
-4. Narrative Arc
+3. Narrative Arc
    PASS: Có ≥2 trong 3: hook mở (câu gây tò mò / đặt vấn đề) → insight (kiến thức vật liệu)
          → takeaway (người đọc biết làm gì tiếp). Có tách đoạn.
    FAIL: Liệt kê feature rời rạc. Không có câu dẫn dắt. Không có kết luận.
 
-5. Tone
+4. Tone
    PASS: Giọng tự tin, giáo dục, trực tiếp. Không emoji >5. Không ngôn ngữ quảng cáo.
          CTA mềm ở cuối caption là chấp nhận được nếu giữ giọng tư vấn, ví dụ:
          "Nếu bạn cần tư vấn theo không gian thực tế, bạn có thể nhắn Bonario để đặt lịch khảo sát."
@@ -169,17 +154,16 @@ Thông tin content đang được review:
    FAIL: Có "siêu", "ưu đãi", "sale", "giảm giá", "đừng bỏ lỡ", "inbox ngay",
          "số lượng có hạn", hoặc giọng van nài / gấp gáp / thúc ép.
 
-6. Visual-Text Alignment
+5. Visual-Text Alignment
    PASS: Caption thêm thông tin không visible trong hình (lý do kỹ thuật, đặc tính ẩn,
          quy trình, câu chuyện đằng sau). Nếu KHÔNG có hình: auto-PASS.
    FAIL: Caption chỉ mô tả lại những gì đã thấy trong hình.
 
-Verdict: PASS (6/6) | REVISION NEEDED (1–2 fail) | REJECT (3+ fail)
+Verdict: PASS (5/5) | REVISION NEEDED (1–2 fail) | REJECT (3+ fail)
 
 Trả về JSON duy nhất, không có text nào ngoài JSON:
 {
   "criteria": [
-    {"name":"Pillar Fit",            "status":"PASS|FAIL","evidence":"1 câu cụ thể từ content"},
     {"name":"Education Depth",       "status":"PASS|FAIL","evidence":"1 câu cụ thể từ content"},
     {"name":"Material Authority",    "status":"PASS|FAIL","evidence":"1 câu cụ thể"},
     {"name":"Narrative Arc",         "status":"PASS|FAIL","evidence":"1 câu cụ thể"},

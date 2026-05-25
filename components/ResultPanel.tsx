@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import {
   Award,
   RefreshCw,
@@ -63,6 +63,11 @@ export default function ResultPanel({
   const [expandedCriterion, setExpandedCriterion] = useState<number | null>(0);
   const [copied, setCopied] = useState(false);
 
+  const criteriaMap = useMemo(
+    () => new Map(brandConfig.criteria.map((c) => [c.name, c])),
+    [brandConfig.criteria],
+  );
+
   // Helper to render verdict metadata
   const getVerdictDetails = (verdict: StreamEvaluationResponse["verdict"]) => {
     switch (verdict) {
@@ -71,24 +76,24 @@ export default function ResultPanel({
           bg: "bg-emerald-950/30 border-emerald-500/25 text-emerald-400",
           badgeBg: "bg-emerald-500/20 text-emerald-400 border-emerald-400/20",
           icon: <CheckCircle className="w-8 h-8 text-emerald-400 shrink-0" />,
-          title: "ĐẠT CHUẨN ĐỊNH HÌNH THƯƠNG HIỆU",
-          desc: "Bài viết xuất sắc đáp ứng toàn bộ các tiêu chuẩn cốt lõi. Sẵn sàng đăng tải.",
+          title: "ĐẠT CHUẨN THƯƠNG HIỆU",
+          desc: "Đáp ứng tốt các tiêu chí cốt lõi. Sẵn sàng đăng tải.",
         };
       case "REVISION NEEDED":
         return {
           bg: "bg-amber-950/30 border-amber-500/25 text-amber-400",
           badgeBg: "bg-amber-500/20 text-amber-400 border-amber-400/20",
           icon: <AlertCircle className="w-8 h-8 text-amber-400 shrink-0" />,
-          title: "CẦN ĐIỀU CHỈNH ĐỂ ĐẠT CHUẨN",
-          desc: "Đạt phần lớn tiêu chí, cần sửa một số điểm nhỏ trước khi đăng.",
+          title: "CẦN ĐIỀU CHỈNH",
+          desc: "Cần chỉnh sửa vài lỗi nhỏ trước khi đăng.",
         };
       case "REJECT":
         return {
           bg: "bg-rose-950/30 border-rose-500/25 text-rose-400",
           badgeBg: "bg-rose-500/20 text-rose-400 border-rose-400/20",
           icon: <XCircle className="w-8 h-8 text-rose-400 shrink-0" />,
-          title: "KHÔNG ĐẠT TIÊU CHUẨN CỐT LÕI",
-          desc: "Vi phạm nghiêm trọng tiếng nói thương hiệu. Hãy viết lại dựa trên bản gợi ý.",
+          title: "CHƯA ĐẠT CHUẨN CỐT LÕI",
+          desc: "Chưa đúng tone giọng thương hiệu. Hãy sửa theo bản gợi ý.",
         };
       case "PENDING":
       default:
@@ -101,7 +106,7 @@ export default function ResultPanel({
             />
           ),
           title: "HỆ THỐNG ĐANG KIỂM ĐỊNH...",
-          desc: "Trình AI đang phân tích và đối chiếu từng tiêu chuẩn thương hiệu.",
+          desc: "Đang đối chiếu các tiêu chí thương hiệu.",
         };
     }
   };
@@ -112,25 +117,16 @@ export default function ResultPanel({
       if (navigator.clipboard && navigator.clipboard.writeText) {
         await navigator.clipboard.writeText(text);
       } else {
-        // Fallback for insecure LAN connections (HTTP)
+        // Fallback: select and prompt user for manual copy
         const textArea = document.createElement("textarea");
         textArea.value = text;
-
-        // Move outside of viewport
         textArea.style.position = "fixed";
         textArea.style.left = "-999999px";
         textArea.style.top = "-999999px";
-
         document.body.appendChild(textArea);
         textArea.focus();
         textArea.select();
-
-        const successful = document.execCommand("copy");
         document.body.removeChild(textArea);
-
-        if (!successful) {
-          throw new Error("Fallback copy command failed");
-        }
       }
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
@@ -165,12 +161,11 @@ export default function ResultPanel({
           </div>
           <div>
             <h3 className="text-sm font-bold text-slate-300 font-display">
-              Hệ thống sẵn sàng kiểm định
+              Sẵn sàng kiểm định
             </h3>
-            <p className="text-xs text-slate-500 max-w-sm mx-auto mt-2 leading-relaxed">
-              Vui lòng nhập nội dung bài viết và đính kèm thiết kế hình ảnh, sau
-              đó bấm nút để AI tiến hành quét, đối chiếu và chấm điểm mức độ
-              nhất quán thương hiệu.
+            <p className="text-xs text-slate-550 max-w-xs mx-auto mt-2 leading-relaxed">
+              Nhập caption và đính kèm layout thiết kế, sau đó bấm nút để AI bắt
+              đầu kiểm định mức độ nhất quán thương hiệu.
             </p>
           </div>
         </div>
@@ -277,6 +272,28 @@ export default function ResultPanel({
                   cx="48"
                   cy="48"
                 />
+                {/* 3D Reflection Highlight Ring */}
+                <circle
+                  className="text-white/5"
+                  strokeWidth="0.5"
+                  stroke="currentColor"
+                  fill="transparent"
+                  r={radius - 4}
+                  cx="48"
+                  cy="48"
+                  style={{
+                    filter: "blur(0.5px)",
+                  }}
+                />
+                {/* 3D Glass Reflection Highlight Arc */}
+                <path
+                  d="M 20,48 A 28,28 0 0,1 76,48"
+                  fill="transparent"
+                  stroke="rgba(255, 255, 255, 0.08)"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  className="pointer-events-none"
+                />
               </svg>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
                 <span className="text-xl font-extrabold font-display text-white tracking-tighter">
@@ -321,21 +338,21 @@ export default function ResultPanel({
               onClick={() => setActiveTab("analysis")}
               className={`flex-1 pb-3 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border-b-2 text-center ${
                 activeTab === "analysis"
-                  ? `border-${brand === "bonario" ? "amber" : "indigo"}-500 text-white`
+                  ? brand === "bonario" ? "border-amber-500 text-white" : "border-indigo-500 text-white"
                   : "border-transparent text-slate-400 hover:text-slate-200"
               }`}
             >
-              Kết Quả Đánh Giá Tiêu Chí
+              Đánh Giá
             </button>
             <button
               onClick={() => setActiveTab("revision")}
               className={`flex-1 pb-3 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border-b-2 text-center ${
                 activeTab === "revision"
-                  ? `border-${brand === "bonario" ? "amber" : "indigo"}-500 text-white`
+                  ? brand === "bonario" ? "border-amber-500 text-white" : "border-indigo-500 text-white"
                   : "border-transparent text-slate-400 hover:text-slate-200"
               }`}
             >
-              So Sánh Bản Nháp Tối Ưu
+              So Sánh
             </button>
           </div>
 
@@ -344,14 +361,12 @@ export default function ResultPanel({
             <div className="flex flex-col gap-4 animate-in fade-in duration-300">
               <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
                 <Layers className="w-3.5 h-3.5 text-slate-550 animate-pulse" />
-                Kết Quả Đánh Giá Tiêu Chí
+                Đánh Giá Chi Tiết
               </div>
 
               <div className="flex flex-col gap-2.5">
                 {result.criteria.map((c, idx) => {
-                  const match = brandConfig.criteria.find(
-                    (conf) => conf.name === c.name,
-                  );
+                  const match = criteriaMap.get(c.name);
                   const isPass = c.status === "PASS";
                   const isFail = c.status === "FAIL";
                   const isEvaluating = !isPass && !isFail;
@@ -362,9 +377,11 @@ export default function ResultPanel({
                       key={idx}
                       className={`bg-slate-950/20 border ${
                         isExpanded
-                          ? `border-${brand === "bonario" ? "amber" : "indigo"}-500/30 bg-slate-950/60 shadow-[0_4px_20px_rgba(var(--color-${brand}-accent-rgb),0.03)]`
+                          ? brand === "bonario"
+                            ? "border-amber-500/30 bg-slate-950/60 shadow-[0_4px_20px_rgba(var(--brand-accent-rgb),0.03)]"
+                            : "border-indigo-500/30 bg-slate-950/60 shadow-[0_4px_20px_rgba(var(--brand-accent-rgb),0.03)]"
                           : "border-slate-800/30"
-                      } rounded-xl transition-all duration-300 hover:border-${brand === "bonario" ? "amber" : "indigo"}-500/20`}
+                      } rounded-xl transition-all duration-300 ${brand === "bonario" ? "hover:border-amber-500/20" : "hover:border-indigo-500/20"}`}
                     >
                       {/* Accordion Trigger */}
                       <button
@@ -415,8 +432,10 @@ export default function ResultPanel({
                       </button>
 
                       {/* Accordion Content */}
-                      {isExpanded && (
-                        <div className="px-4 pb-4 border-t border-slate-950/40 pt-3 flex flex-col gap-2.5 text-xs text-slate-300 animate-in fade-in slide-in-from-top-1 duration-200">
+                      <div
+                        className={`accordion-content-transition ${isExpanded ? "expanded" : ""}`}
+                      >
+                        <div className="accordion-inner px-4 pb-4 border-t border-slate-950/40 pt-3 flex flex-col gap-2.5 text-xs text-slate-300">
                           {match && (
                             <div>
                               <span className="text-[9px] font-bold text-slate-500 uppercase tracking-wider block mb-1">
@@ -442,7 +461,7 @@ export default function ResultPanel({
                             </p>
                           </div>
                         </div>
-                      )}
+                      </div>
                     </div>
                   );
                 })}
@@ -458,7 +477,7 @@ export default function ResultPanel({
                 <div className="bg-rose-950/10 border border-rose-500/20 rounded-xl p-4 flex flex-col gap-2.5">
                   <h4 className="text-xs font-bold text-rose-400 flex items-center gap-2 uppercase tracking-wider">
                     <AlertTriangle className="w-4.5 h-4.5 shrink-0 text-rose-400" />
-                    Các Điểm Cần Khắc Phục (Fixes)
+                    Điểm Cần Khắc Phục
                   </h4>
                   <ul className="flex flex-col gap-2 pl-1">
                     {result.fixes.map((fix, idx) => (
@@ -479,26 +498,26 @@ export default function ResultPanel({
               {/* SIDE BY SIDE COMPARISON */}
               <div className="flex flex-col gap-3">
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                  So Sánh Bản Nháp Tối Ưu
+                  So Sánh Bản Nháp
                 </span>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {/* Original Caption Card */}
-                  <div className="bg-slate-950/30 border border-slate-900 rounded-xl p-4 flex flex-col gap-2.5">
-                    <div className="flex items-center gap-2 border-b border-slate-900 pb-2">
-                      <FileText className="w-3.5 h-3.5 text-slate-550" />
+                  <div className="bg-slate-950/50 border border-slate-900/90 hover:border-slate-800 rounded-xl p-4 flex flex-col gap-2.5 shadow-inner transition-all duration-300">
+                    <div className="flex items-center gap-2 border-b border-slate-900/50 pb-2">
+                      <FileText className="w-3.5 h-3.5 text-slate-500" />
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">
-                        Văn bản nháp gốc
+                        Bản nháp gốc
                       </span>
                     </div>
-                    <p className="text-xs text-slate-400 leading-relaxed whitespace-pre-wrap max-h-[180px] overflow-y-auto font-sans">
+                    <p className="text-xs text-slate-300 leading-relaxed whitespace-pre-wrap max-h-[180px] overflow-y-auto font-sans">
                       {caption || "(Chưa có nội dung)"}
                     </p>
                   </div>
 
                   {/* Suggested Revision Card */}
                   <div
-                    className={`bg-slate-950/60 border-2 ${brand === "bonario" ? "border-amber-500/30 shadow-[0_0_25px_rgba(245,158,11,0.06)]" : "border-indigo-500/30 shadow-[0_0_25px_rgba(99,102,241,0.06)]"} rounded-xl p-4 flex flex-col gap-2.5 transition-all duration-500`}
+                    className={`bg-slate-950/80 border-2 ${brand === "bonario" ? "border-amber-500/40 shadow-[0_0_30px_rgba(245,158,11,0.08)]" : "border-indigo-500/40 shadow-[0_0_30px_rgba(99,102,241,0.08)]"} rounded-xl p-4 flex flex-col gap-2.5 transition-all duration-500`}
                   >
                     <div className="flex items-center justify-between border-b border-slate-900 pb-2">
                       <div className="flex items-center gap-2">
@@ -506,7 +525,7 @@ export default function ResultPanel({
                           className={`w-3.5 h-3.5 ${theme.accentText}`}
                         />
                         <span className="text-[10px] font-bold text-slate-200 uppercase tracking-wide">
-                          Nháp gợi ý chuẩn thương hiệu
+                          Bản gợi ý chuẩn brand
                         </span>
                       </div>
 
@@ -517,7 +536,7 @@ export default function ResultPanel({
                         className={`flex items-center gap-1.5 text-[9px] font-bold px-2.5 py-1 rounded-md transition-all cursor-pointer select-none border ${
                           copied
                             ? "bg-emerald-950 border-emerald-500/30 text-emerald-400"
-                            : `text-slate-300 hover:text-white bg-slate-900/60 border-slate-800 hover:border-${brand === "bonario" ? "amber-500/30" : "indigo-500/30"}`
+                            : `text-slate-300 hover:text-white bg-slate-900/60 border-slate-800 ${brand === "bonario" ? "hover:border-amber-500/30" : "hover:border-indigo-500/30"}`
                         }`}
                       >
                         {copied ? (
@@ -528,7 +547,7 @@ export default function ResultPanel({
                         ) : (
                           <>
                             <Copy className="w-3 h-3 text-slate-400" />
-                            <span>Sao chép nháp gợi ý</span>
+                            <span>Sao chép bản gợi ý</span>
                           </>
                         )}
                       </button>

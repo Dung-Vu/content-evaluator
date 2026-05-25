@@ -9,7 +9,7 @@ interface BrandSwitcherProps {
 
 export default function BrandSwitcher({ brand, onChange }: BrandSwitcherProps) {
   return (
-    <div className="relative flex bg-slate-950/90 p-1 rounded-xl border border-slate-800/40 shadow-inner w-[200px] h-9 items-center">
+    <div className="relative flex bg-slate-950/90 p-1 rounded-xl border border-slate-800/40 shadow-inner w-[180px] sm:w-[200px] h-9 items-center">
       {/* Sliding Active Pill */}
       <div
         className={`absolute top-[3px] bottom-[3px] rounded-lg transition-all duration-300 ease-out shadow-lg ${

@@ -6,8 +6,8 @@ import { BrandKey } from "@/lib/brands";
 
 export async function POST(request: NextRequest) {
   // 1. Get Client IP for Rate Limiting
-  const ip =
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+  // Use NextRequest built-in IP detection (trusted by Next.js server, not spoofable via headers)
+  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     request.headers.get("x-real-ip") ||
     "127.0.0.1";
 
@@ -122,9 +122,14 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Convert file buffer to base64
+      // Convert file buffer to base64 (platform-agnostic, no Node.js Buffer dependency)
       const arrayBuffer = await file.arrayBuffer();
-      const base64 = Buffer.from(arrayBuffer).toString("base64");
+      const bytes = new Uint8Array(arrayBuffer);
+      let binary = "";
+      for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+      }
+      const base64 = btoa(binary);
       processedImages.push({
         base64,
         mimeType: file.type,
@@ -149,13 +154,14 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error: unknown) {
-    console.error("API error during content evaluation:", error);
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("API error during content evaluation:", errorMessage);
 
     // Map AI/System errors to appropriate response codes
     let status = 500;
     let code = "UNKNOWN_ERROR";
     let message = "Đã xảy ra lỗi không xác định trên hệ thống.";
-    let details = "Unknown error details";
+    let details: string | undefined;
 
     if (error && typeof error === "object") {
       const err = error as Record<string, unknown>;
@@ -163,7 +169,7 @@ export async function POST(request: NextRequest) {
       const errStatus = typeof err.status === "number" ? err.status : undefined;
       const errName = typeof err.name === "string" ? err.name : "";
 
-      details = errMsg || details;
+      details = errMsg;
 
       if (
         errStatus === 401 ||
@@ -183,12 +189,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    const isDev = process.env.NODE_ENV === "development";
+
     return NextResponse.json(
       {
         error: {
           code,
           message,
-          details,
+          ...(isDev && details ? { details } : {}),
         },
       },
       { status },

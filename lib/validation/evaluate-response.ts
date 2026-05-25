@@ -15,7 +15,7 @@ export const CriterionSchema = z.object({
 });
 
 export const EvaluationResponseSchema = z.object({
-  criteria: z.array(CriterionSchema).min(5).max(6),
+  criteria: z.array(CriterionSchema).min(1).max(20),
   verdict: z.enum(["PASS", "REVISION NEEDED", "REJECT"]),
   verdict_summary: z.string().min(1, "Tổng kết kết luận không được để trống"),
   fixes: z.array(z.string()),
