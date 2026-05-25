@@ -173,7 +173,7 @@ export default function ResultPanel({
 
       {/* LOADING STATE */}
       {isSubmitting && (
-        <div className="flex-1 bg-slate-900/25 border border-slate-800/60 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col gap-6 animate-pulse">
+        <div className={`flex-1 ${theme.panelStyle} rounded-2xl p-6 shadow-xl flex flex-col gap-6 animate-pulse`}>
           <div className="flex items-center gap-4 border-b border-slate-800/50 pb-6">
             <div className="h-14 w-14 rounded-xl bg-slate-850" />
             <div className="flex-1 flex flex-col gap-2">
@@ -193,7 +193,7 @@ export default function ResultPanel({
 
       {/* SUCCESS RESULT PANEL */}
       {!isSubmitting && result && (
-        <div className="flex-1 bg-slate-900/25 border border-slate-800/60 backdrop-blur-md rounded-2xl p-6 shadow-xl flex flex-col gap-6 animate-in fade-in slide-in-from-right-4 duration-400">
+        <div className={`flex-1 ${theme.panelStyle} ${theme.hoverStyle} rounded-2xl p-6 shadow-xl flex flex-col gap-6 animate-in fade-in slide-in-from-right-4 duration-400`}>
           {/* BRAND SCORE HEADER (Visual Circle Progress Gauge) */}
           <div className="bg-slate-950/40 border border-slate-900 rounded-2xl p-4 flex flex-col sm:flex-row items-center gap-6 shadow-inner">
             {/* SVG Gauge */}
@@ -319,7 +319,7 @@ export default function ResultPanel({
               <p className="text-xs text-slate-400 mt-2 leading-relaxed">
                 {result.verdict_summary}
               </p>
-              <div className="flex items-center gap-4 mt-3 justify-center sm:justify-start text-[10px] text-slate-500 font-semibold uppercase tracking-wider">
+              <div className="flex items-center gap-4 mt-3 justify-center sm:justify-start text-[10px] text-slate-550 font-semibold uppercase tracking-wider">
                 <span className="flex items-center gap-1">
                   <span className="h-2 w-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
                   {passedCriteriaCount} Đạt
@@ -333,23 +333,30 @@ export default function ResultPanel({
           </div>
 
           {/* NAVIGATION TABS */}
-          <div className="flex border-b border-slate-900/80 pb-px">
+          <div className="relative flex bg-slate-950/60 border border-slate-900 rounded-xl p-1">
+            <div
+              className={`absolute top-1 bottom-1 rounded-lg transition-all duration-350 ease-out ${
+                activeTab === "analysis" ? "left-1 w-[calc(50%-4px)]" : "left-[calc(50%+2px)] w-[calc(50%-4px)]"
+              } ${
+                brand === "bonario"
+                  ? "bg-gradient-to-r from-amber-600/90 to-amber-700/90 shadow-amber-600/10 border border-amber-500/20"
+                  : "bg-gradient-to-r from-indigo-600/90 to-indigo-700/90 shadow-indigo-600/10 border border-indigo-500/20"
+              }`}
+            />
             <button
+              type="button"
               onClick={() => setActiveTab("analysis")}
-              className={`flex-1 pb-3 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border-b-2 text-center ${
-                activeTab === "analysis"
-                  ? brand === "bonario" ? "border-amber-500 text-white" : "border-indigo-500 text-white"
-                  : "border-transparent text-slate-400 hover:text-slate-200"
+              className={`relative z-10 flex-1 text-center py-1.5 text-xs font-bold uppercase tracking-wider cursor-pointer transition-colors duration-300 ${
+                activeTab === "analysis" ? "text-white" : "text-slate-400 hover:text-slate-200"
               }`}
             >
               Đánh Giá
             </button>
             <button
+              type="button"
               onClick={() => setActiveTab("revision")}
-              className={`flex-1 pb-3 text-xs font-bold uppercase tracking-wider transition-all cursor-pointer border-b-2 text-center ${
-                activeTab === "revision"
-                  ? brand === "bonario" ? "border-amber-500 text-white" : "border-indigo-500 text-white"
-                  : "border-transparent text-slate-400 hover:text-slate-200"
+              className={`relative z-10 flex-1 text-center py-1.5 text-xs font-bold uppercase tracking-wider cursor-pointer transition-colors duration-300 ${
+                activeTab === "revision" ? "text-white" : "text-slate-400 hover:text-slate-200"
               }`}
             >
               So Sánh
@@ -414,15 +421,22 @@ export default function ResultPanel({
                           </span>
                         </div>
                         <div className="flex items-center gap-2">
-                          <span
-                            className={`text-[9px] font-bold px-2 py-0.5 rounded-md border ${
+                           <span
+                            className={`text-[9px] font-bold px-2 py-0.5 rounded-md border flex items-center gap-1.5 ${
                               isPass
-                                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_12px_rgba(16,185,129,0.15)]"
                                 : isFail
-                                  ? "bg-rose-500/10 text-rose-400 border-rose-500/20"
-                                  : "bg-slate-500/10 text-slate-400 border-slate-550/20 animate-pulse"
+                                  ? "bg-rose-500/10 text-rose-400 border-rose-500/20 shadow-[0_0_12px_rgba(244,63,94,0.15)]"
+                                  : "bg-slate-500/10 text-slate-450 border-slate-650/20 animate-pulse"
                             }`}
                           >
+                            <span className={`w-1.5 h-1.5 rounded-full ${
+                              isPass 
+                                ? "bg-emerald-400 animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.8)]" 
+                                : isFail 
+                                  ? "bg-rose-400 shadow-[0_0_6px_rgba(251,113,133,0.8)]" 
+                                  : "bg-slate-400 animate-ping"
+                            }`} />
                             {isEvaluating ? "ĐANG QUÉT..." : c.status}
                           </span>
                           <ChevronRight

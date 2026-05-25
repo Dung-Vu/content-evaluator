@@ -388,14 +388,12 @@ export default function Home() {
       {/* Decorative Grid Backdrop */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#0f172a33_1px,transparent_1px),linear-gradient(to_bottom,#0f172a33_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none z-0 opacity-40 animate-grid-drift" />
 
-      {/* Dynamic Background Glows based on Brand Selection */}
-      <div
-        className={`absolute top-0 left-0 right-0 h-[600px] bg-gradient-to-b ${theme.bgGradient} pointer-events-none z-0 transition-all duration-1000`}
-      />
-
-      {/* Ambient Moving Mesh Orbs */}
-      <div className="absolute top-[15%] left-[10%] w-[300px] h-[300px] rounded-full bg-indigo-500/5 blur-[100px] pointer-events-none z-0 animate-float-1" />
-      <div className="absolute bottom-[25%] right-[10%] w-[350px] h-[350px] rounded-full bg-amber-500/5 blur-[120px] pointer-events-none z-0 animate-float-2" />
+      {/* Dynamic Aurora Mesh Background */}
+      <div className="aurora-container">
+        <div className="aurora-orb aurora-1" />
+        <div className="aurora-orb aurora-2" />
+        <div className="aurora-orb aurora-3" />
+      </div>
 
       {/* FIXED TOP ERROR TOAST */}
       {errorToast && (
@@ -586,7 +584,7 @@ export default function Home() {
               <button
                 type="submit"
                 disabled={isSubmitting || isStreaming}
-                className={`w-full mt-2 bg-gradient-to-r ${theme.primaryColor} disabled:from-slate-800 disabled:to-slate-800 text-white text-xs font-bold py-3.5 px-4 rounded-xl shadow-lg ${brand === "bonario" ? "hover:shadow-amber-500/10" : "hover:shadow-indigo-500/10"} active:scale-[0.99] transition-all duration-500 flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed`}
+                className={`w-full mt-2 bg-gradient-to-r ${theme.primaryColor} disabled:from-slate-800 disabled:to-slate-800 text-white text-xs font-bold py-3.5 px-4 rounded-xl shadow-lg ${brand === "bonario" ? "hover:shadow-amber-500/15 shadow-amber-500/5" : "hover:shadow-indigo-500/15 shadow-indigo-500/5"} active:scale-[0.99] transition-all duration-500 flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed btn-shimmer`}
               >
                 {isSubmitting ? (
                   <>
