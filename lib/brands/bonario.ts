@@ -1,5 +1,10 @@
 import { BrandConfig } from "./types";
 
+export const BONARIO_SOCIAL_FOOTER = `𝐁𝐎𝐍𝐀𝐑𝐈𝐎 - 𝐏𝐫𝐞𝐦𝐢𝐮𝐦 𝐂𝐮𝐫𝐭𝐚𝐢𝐧𝐬 𝐚𝐧𝐝 𝐖𝐚𝐥𝐥𝐜𝐨𝐯𝐞𝐫𝐢𝐧𝐠𝐬
+𝐒𝐡𝐨𝐰𝐫𝐨𝐨𝐦: 22 Đường 19A, An Phú, Q2, TP.HCM
+𝐇𝐨𝐭𝐥𝐢𝐧𝐞: +84 286 660 9009
+www.bonario.vn`;
+
 export const bonarioConfig: BrandConfig = {
   key: "bonario",
   name: "Bonario Content Evaluator",
@@ -64,20 +69,20 @@ export const bonarioConfig: BrandConfig = {
     {
       name: "Education Depth",
       question:
-        "Sau khi đọc, người đọc biết thêm được điều gì cụ thể về vật liệu mà có thể ứng dụng hoặc kiểm chứng được?",
+        "Trước khi chấm, hãy tự trả lời: sau khi đọc, người đọc rút ra được điều gì cụ thể về vật liệu hoặc cách ứng dụng nó trong không gian?",
       passDesc:
-        "Có ≥1 trong 3 dạng dưới đây: (A) Đặc tính kỹ thuật & Bảo quản — cấu tạo, độ bền, phản ứng với môi trường; hoặc hướng dẫn dùng, làm sạch, tuổi thọ (B) Ứng dụng vào không gian — lý do chọn vật liệu theo loại phòng, kích thước, chức năng; cần có lý do, không chỉ gắn nhãn phong cách (C) Nguyên tắc thiết kế & thẩm mỹ — quy tắc hoặc logic về cách vật liệu tương tác thị giác; cần có nguyên tắc có thể áp dụng, không chỉ mô tả cảm nhận",
+        "Trả lời được rõ 1 takeaway cụ thể sau khi đọc. Takeaway đó thuộc ≥1 trong 3 dạng: (A) hiểu thêm đặc tính hoặc cách bảo quản vật liệu (B) hiểu thêm cách ứng dụng vật liệu vào thẩm mỹ, công năng hoặc không gian (C) hiểu thêm 1 logic thiết kế có thể áp dụng, không chỉ dừng ở cảm nhận đẹp/xấu.",
       failDesc:
-        "Không có dạng nào — toàn bộ content chỉ là cảm nhận thẩm mỹ. Hoặc <40 từ",
+        "Không nêu được takeaway cụ thể người đọc nhận về; nội dung chỉ dừng ở mô tả cảm xúc, khen đẹp, hoặc quá ngắn để tạo giá trị.",
     },
     {
       name: "Material Authority",
       question:
-        "Thông tin về vật liệu có chính xác, cụ thể, có thể kiểm chứng không? Hay chỉ là từ ngữ marketing mơ hồ?",
+        "Content có nêu ít nhất 1 điểm cụ thể, hữu ích về cách vật liệu được ứng dụng trong thẩm mỹ, thiết kế hoặc không gian thực tế không?",
       passDesc:
-        "Có số liệu, tên kỹ thuật, hoặc mô tả hành vi vật liệu có thể kiểm chứng. Không có cụm mơ hồ.",
+        "Có ít nhất 1 điểm cụ thể về ứng dụng thẩm mỹ, logic thiết kế, hành vi vật liệu trong không gian hoặc trải nghiệm sử dụng. Không cần thông số quá kỹ thuật.",
       failDesc:
-        "Dùng 'cao cấp', 'chất lượng tốt', 'premium', 'bền đẹp' không kèm bằng chứng.",
+        "Chỉ dùng 'cao cấp', 'premium', 'bền đẹp', 'tinh xảo' mà không nêu ra 1 điểm ứng dụng, thiết kế hoặc trải nghiệm cụ thể.",
     },
     {
       name: "Narrative Arc",
@@ -123,21 +128,26 @@ Thông tin content đang được review:
 - Phục vụ: ${serving}
 (Dùng thông tin này để hiệu chỉnh kỳ vọng về độ dài, cấu trúc, và mức độ chi tiết phù hợp.)
 
+Riêng với Education Depth, trước khi chấm hãy tự xác định 1 câu nội bộ:
+"Sau khi đọc xong, người đọc rút ra điều gì cụ thể?"
+Nếu không thể trả lời rõ câu này thì Education Depth phải FAIL.
+
 5 tiêu chí — chấm PASS hoặc FAIL:
 
 1. Education Depth
-   PASS: Có ≥1 trong 3 dạng:
-         (A) Đặc tính kỹ thuật & Bảo quản — cấu tạo, độ bền, phản ứng với môi trường; hoặc hướng dẫn dùng, làm sạch, tuổi thọ.
-         (B) Ứng dụng vào không gian — lý do chọn vật liệu theo loại phòng, kích thước, chức năng; cần có lý do, không chỉ gắn nhãn phong cách.
-         (C) Nguyên tắc thiết kế & thẩm mỹ — quy tắc hoặc logic về cách vật liệu tương tác thị giác; cần có nguyên tắc có thể áp dụng, không chỉ mô tả cảm nhận.
-         Lưu ý: Cảm nhận thẩm mỹ thuần túy ("thư thái", "tinh tế", "sang trọng") không tính vào bất kỳ dạng PASS nào. Dạng C chỉ hợp lệ khi có nguyên tắc hoặc lý do.
-   FAIL: Không có dạng nào — toàn bộ content chỉ là cảm nhận thẩm mỹ. Hoặc content dưới 40 từ.
+   PASS: Xác định được rõ 1 takeaway cụ thể sau khi đọc. Takeaway đó thuộc ≥1 trong 3 dạng:
+     (A) Hiểu thêm đặc tính hoặc cách bảo quản vật liệu.
+     (B) Hiểu thêm cách ứng dụng vật liệu vào công năng, thẩm mỹ hoặc không gian.
+     (C) Hiểu thêm 1 logic thiết kế có thể áp dụng, không chỉ mô tả cảm nhận.
+     Lưu ý: Cảm nhận thẩm mỹ thuần túy ("thư thái", "tinh tế", "sang trọng") không tính là takeaway đạt chuẩn.
+   FAIL: Không xác định được takeaway cụ thể người đọc nhận về. Hoặc content dưới 40 từ.
 
 2. Material Authority
-   PASS: Có ≥1 trong: số liệu (GSM, độ cứng Mohs, nhiệt độ, năm...), tên kỹ thuật chính xác,
-         mô tả hành vi vật liệu có thể kiểm chứng.
+   PASS: Có ít nhất 1 điểm cụ thể về ứng dụng thẩm mỹ, logic thiết kế, cách vật liệu vận hành trong không gian,
+     hoặc trải nghiệm sử dụng có thể kiểm chứng bằng quan sát thực tế.
+     Không cần thông số quá kỹ thuật.
    FAIL: Chỉ có "cao cấp", "chất lượng tốt", "premium", "bền đẹp", "tinh xảo"
-         mà không có bằng chứng cụ thể nào.
+     mà không nêu ra 1 điểm ứng dụng, thiết kế hoặc trải nghiệm cụ thể.
 
 3. Narrative Arc
    PASS: Có ≥2 trong 3: hook mở (câu gây tò mò / đặt vấn đề) → insight (kiến thức vật liệu)
@@ -175,7 +185,14 @@ Trả về JSON duy nhất, không có text nào ngoài JSON:
   "fixes": ["fix cụ thể 1 — chỉ khi FAIL", "fix cụ thể 2"],
   "suggested_revision": "Bản viết lại hoàn chỉnh. LUÔN cung cấp dù verdict là PASS.
     PASS: đây là phiên bản chuẩn mực tốt nhất. REVISION/REJECT: bản đã sửa đúng brand.
-    Giữ nguyên ngôn ngữ (Việt/Anh). Dùng giọng văn và ngôn ngữ theo tinh thần editorial của ELLE Decoration Vietnam: tinh tế, giàu quan sát, giàu hình ảnh nhưng tiết chế, thiên về biên tập không gian - vật liệu, không mang âm điệu quảng cáo trực diện. Không giải thích. Chỉ đưa ra bản viết."
+    Giữ nguyên ngôn ngữ (Việt/Anh). Dùng giọng văn và ngôn ngữ theo tinh thần editorial của ELLE Decoration Vietnam: tinh tế, giàu quan sát, giàu hình ảnh nhưng tiết chế, thiên về biên tập không gian - vật liệu, không mang âm điệu quảng cáo trực diện. Không giải thích. Chỉ đưa ra bản viết.
+    BẮT BUỘC theo đúng cấu trúc social này, theo đúng thứ tự và không in nhãn TITLE/CTA/Footer:
+    - Dòng 1: Title
+    - Đoạn 1: 2-3 câu ngắn
+    - Đoạn 2: 2-3 câu ngắn
+    - CTA: 1-2 câu
+    - Footer: dùng nguyên văn block sau:
+${BONARIO_SOCIAL_FOOTER}"
 }
 
 Quy tắc viết feedback:

@@ -3,129 +3,31 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { Sparkles, FileText, RefreshCw, AlertTriangle, X } from "lucide-react";
 import { BrandKey, getBrandConfig } from "@/lib/brands";
+import {
+  extractPartialStreamState,
+  parseFinalStreamResult,
+  type StreamEvaluationResponse,
+} from "@/lib/validation/stream-response";
 import BrandSwitcher from "@/components/BrandSwitcher";
 import CustomSelect from "@/components/CustomSelect";
 import ImageUploader, { ImageFile } from "@/components/ImageUploader";
-import ResultPanel, {
-  StreamEvaluationResponse,
-} from "@/components/ResultPanel";
+import ResultPanel from "@/components/ResultPanel";
 
-// Extracts partial JSON structure from stream
-function extractPartialState(
-  streamText: string,
-  brandCriteriaNames: string[],
-  hasImages: boolean,
-): StreamEvaluationResponse {
-  const state: StreamEvaluationResponse = {
-    criteria: brandCriteriaNames.map((name) => ({
-      name,
-      status: "evaluating",
-      evidence: "",
-    })),
-    verdict: "PENDING",
-    verdict_summary: "Đang phân tích các tiêu chí...",
-    fixes: [],
-    suggested_revision: "",
-  };
+const STREAM_TIMEOUT_MS = 120_000;
 
-  const cleanQuote = (val: string) => {
-    let clean = val.trim();
-    if (clean.startsWith('"') && clean.endsWith('"')) {
-      clean = clean.slice(1, -1);
-    }
-    return clean.trim();
-  };
-
-  // 1. Try to find statuses and evidence for criteria
-  for (const crit of state.criteria) {
-    if (
-      (crit.name === "Visual-Text Alignment" ||
-        crit.name === "Visual Standard") &&
-      !hasImages
-    ) {
-      crit.status = "PASS";
-      crit.evidence = "Không có hình — auto PASS";
-      continue;
-    }
-
-    const nameEscaped = crit.name.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
-    const statusRegex = new RegExp(
-      `"${nameEscaped}"[^}]*?"status"\\s*:\\s*"([^"]*)"`,
-      "i",
-    );
-    const statusMatch = streamText.match(statusRegex);
-    if (statusMatch && statusMatch[1]) {
-      const parsedStatus = statusMatch[1].toUpperCase();
-      if (parsedStatus === "PASS" || parsedStatus === "FAIL") {
-        crit.status = parsedStatus;
-      }
-    }
-
-    const evidenceRegex = new RegExp(
-      `"${nameEscaped}"[^}]*?"evidence"\\s*:\\s*"([^"]*?)(?:"|$)`,
-      "i",
-    );
-    const evidenceMatch = streamText.match(evidenceRegex);
-    if (evidenceMatch && evidenceMatch[1]) {
-      crit.evidence = cleanQuote(evidenceMatch[1]);
-    }
-  }
-
-  // 2. Extract overall verdict
-  const verdictMatch = streamText.match(/"verdict"\s*:\s*"([^"]*?)(?:"|$)/i);
-  if (verdictMatch && verdictMatch[1]) {
-    const parsedVerdict = verdictMatch[1].toUpperCase();
-    if (
-      parsedVerdict === "PASS" ||
-      parsedVerdict === "REVISION NEEDED" ||
-      parsedVerdict === "REJECT"
-    ) {
-      state.verdict = parsedVerdict;
-    }
-  }
-
-  // 3. Extract verdict summary
-  const summaryMatch = streamText.match(
-    /"verdict_summary"\s*:\s*"([^"]*?)(?:"|$)/i,
-  );
-  if (summaryMatch && summaryMatch[1]) {
-    state.verdict_summary = cleanQuote(summaryMatch[1]);
-  }
-
-  // 4. Extract fixes
-  const fixesMatch = streamText.match(/"fixes"\s*:\s*\[([\s\S]*?)(?:\]|$)/i);
-  if (fixesMatch && fixesMatch[1]) {
-    const rawFixes = fixesMatch[1];
-    const fixStrings = [...rawFixes.matchAll(/"([^"]*?)"/g)]
-      .map((m) => m[1].trim())
-      .filter(Boolean);
-    state.fixes = fixStrings;
-  }
-
-  // 5. Extract suggested revision
-  const suggestedMatch = streamText.match(
-    /"suggested_revision"\s*:\s*"([\s\S]*?)(?:"|$)(?:\s*}|,\s*"|\s*$)/i,
-  );
-  if (suggestedMatch && suggestedMatch[1]) {
-    state.suggested_revision = suggestedMatch[1]
-      .replace(/\\n/g, "\n")
-      .replace(/\\"/g, '"')
-      .replace(/\\t/g, "\t");
-  }
-
-  // Calculate verdict dynamically to match criteria checkboxes
-  const allEvaluated = state.criteria.every(
-    (c) => c.status === "PASS" || c.status === "FAIL",
-  );
-  if (allEvaluated) {
-    const failCount = state.criteria.filter((c) => c.status === "FAIL").length;
-    state.verdict =
-      failCount === 0 ? "PASS" : failCount <= 2 ? "REVISION NEEDED" : "REJECT";
-  } else {
-    state.verdict = "PENDING";
-  }
-
-  return state;
+function readWithTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  return Promise.race([
+    reader.read(),
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Stream timeout — AI không phản hồi.")),
+        timeoutMs,
+      ),
+    ),
+  ]);
 }
 
 // Visual premium themes mapped by active brand
@@ -148,7 +50,7 @@ const BRAND_THEMES = {
     ringFocus: "focus:border-amber-500/50 focus:ring-4 focus:ring-amber-500/10",
     scoreStroke: "text-amber-500",
     cardHover: "hover:border-amber-500/20 hover:bg-slate-900/60",
-    panelStyle: "glass-panel-bonario",
+    panelStyle: "glass-panel-brand",
     hoverStyle: "premium-hover",
   },
   ordinaire: {
@@ -170,7 +72,7 @@ const BRAND_THEMES = {
       "focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/10",
     scoreStroke: "text-indigo-500",
     cardHover: "hover:border-indigo-500/20 hover:bg-slate-900/60",
-    panelStyle: "glass-panel-ordinaire",
+    panelStyle: "glass-panel-brand",
     hoverStyle: "premium-hover",
   },
 };
@@ -198,6 +100,11 @@ export default function Home() {
   const [validationError, setValidationError] = useState<string | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
+
+  // Sync data-brand attribute to <html> so CSS variables cascade globally
+  useEffect(() => {
+    document.documentElement.dataset.brand = brand;
+  }, [brand]);
 
   const wordCount = useMemo(
     () => caption.trim().split(/\s+/).filter(Boolean).length,
@@ -322,7 +229,7 @@ export default function Home() {
         try {
           let streamDone = false;
           while (true) {
-            const { done, value } = await reader.read();
+            const { done, value } = await readWithTimeout(reader, STREAM_TIMEOUT_MS);
             if (done) break;
 
             const chunk = decoder.decode(value, { stream: true });
@@ -345,19 +252,37 @@ export default function Home() {
                   const content = parsed.choices?.[0]?.delta?.content || "";
                   accumulatedText += content;
 
-                  const updatedState = extractPartialState(
+                  const updatedState = extractPartialStreamState(
                     accumulatedText,
                     brandCriteriaNames,
                     images.length > 0,
                   );
                   setResult(updatedState);
                 } catch {
-                  // Ignore JSON parse errors for incomplete JSON
+                  if (process.env.NODE_ENV === "development") {
+                    console.debug("[SSE] Failed to parse chunk:", dataStr.slice(0, 80));
+                  }
                 }
               }
             }
             if (streamDone) break;
           }
+
+          // Final parse: use JSON.parse for accurate result (handles escaped quotes in revision)
+          if (accumulatedText.trim()) {
+            const finalResult = parseFinalStreamResult(
+              accumulatedText,
+              brandCriteriaNames,
+              images.length > 0,
+            );
+            setResult(finalResult);
+          }
+        } catch (streamErr: unknown) {
+          const msg =
+            streamErr instanceof Error
+              ? streamErr.message
+              : "Lỗi trong quá trình nhận dữ liệu.";
+          setErrorToast({ message: msg, code: "STREAM_ERROR" });
         } finally {
           reader.releaseLock();
           abortControllerRef.current = null;
@@ -388,12 +313,14 @@ export default function Home() {
       {/* Decorative Grid Backdrop */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#0f172a33_1px,transparent_1px),linear-gradient(to_bottom,#0f172a33_1px,transparent_1px)] bg-[size:32px_32px] pointer-events-none z-0 opacity-40 animate-grid-drift" />
 
-      {/* Dynamic Aurora Mesh Background */}
-      <div className="aurora-container">
-        <div className="aurora-orb aurora-1" />
-        <div className="aurora-orb aurora-2" />
-        <div className="aurora-orb aurora-3" />
-      </div>
+      {/* Dynamic Background Glows based on Brand Selection */}
+      <div
+        className={`absolute top-0 left-0 right-0 h-[600px] bg-gradient-to-b ${theme.bgGradient} pointer-events-none z-0 transition-all duration-1000`}
+      />
+
+      {/* Ambient Moving Mesh Orbs */}
+      <div className="absolute top-[15%] left-[10%] w-[300px] h-[300px] rounded-full bg-indigo-500/5 blur-[100px] pointer-events-none z-0 animate-float-1" />
+      <div className="absolute bottom-[25%] right-[10%] w-[350px] h-[350px] rounded-full bg-amber-500/5 blur-[120px] pointer-events-none z-0 animate-float-2" />
 
       {/* FIXED TOP ERROR TOAST */}
       {errorToast && (
@@ -430,7 +357,7 @@ export default function Home() {
             <div>
               <div className="flex items-center gap-2">
                 <h1
-                  className={`text-lg font-bold font-display bg-gradient-to-r ${theme.logoGradient} bg-clip-text text-transparent transition-all duration-1000`}
+                  className={`text-lg font-bold font-sans bg-gradient-to-r ${theme.logoGradient} bg-clip-text text-transparent transition-all duration-1000`}
                 >
                   Content Evaluator
                 </h1>
@@ -439,7 +366,7 @@ export default function Home() {
                   Qwen 3.6 Active
                 </span>
               </div>
-              <p className="text-[9px] text-slate-400 tracking-wider font-semibold uppercase font-display">
+              <p className="text-[9px] text-slate-400 tracking-wider font-semibold uppercase font-sans">
                 Brand Consistency Engine
               </p>
             </div>
@@ -459,7 +386,7 @@ export default function Home() {
           >
             <div className="flex items-center justify-between border-b border-slate-800/50 pb-4">
               <div>
-                <h2 className="text-md font-bold text-slate-100 flex items-center gap-2 font-display">
+                <h2 className="text-md font-bold text-slate-100 flex items-center gap-2 font-sans">
                   <FileText
                     className={`w-4.5 h-4.5 ${theme.accentText} transition-colors duration-1000`}
                   />
@@ -488,7 +415,7 @@ export default function Home() {
                     Caption bài viết
                   </label>
                   <span
-                    className={`text-[10px] font-mono font-medium ${wordCount >= 40 ? theme.accentText : "text-slate-500"} transition-colors duration-1000`}
+                    className={`text-[10px] font-sans font-medium ${wordCount >= 40 ? theme.accentText : "text-slate-500"} transition-colors duration-1000`}
                   >
                     {wordCount} từ
                   </span>
@@ -584,7 +511,7 @@ export default function Home() {
               <button
                 type="submit"
                 disabled={isSubmitting || isStreaming}
-                className={`w-full mt-2 bg-gradient-to-r ${theme.primaryColor} disabled:from-slate-800 disabled:to-slate-800 text-white text-xs font-bold py-3.5 px-4 rounded-xl shadow-lg ${brand === "bonario" ? "hover:shadow-amber-500/15 shadow-amber-500/5" : "hover:shadow-indigo-500/15 shadow-indigo-500/5"} active:scale-[0.99] transition-all duration-500 flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed btn-shimmer`}
+                className={`w-full mt-2 bg-gradient-to-r ${theme.primaryColor} disabled:from-slate-800 disabled:to-slate-800 text-white text-xs font-bold py-3.5 px-4 rounded-xl shadow-lg ${brand === "bonario" ? "hover:shadow-amber-500/10" : "hover:shadow-indigo-500/10"} active:scale-[0.99] transition-all duration-500 flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed`}
               >
                 {isSubmitting ? (
                   <>
@@ -626,7 +553,7 @@ export default function Home() {
 
       {/* FOOTER */}
       <footer className="relative z-10 border-t border-slate-900/60 py-6 text-center bg-slate-950/30">
-        <p className="text-[9px] text-slate-500 font-bold tracking-widest uppercase font-display">
+        <p className="text-[9px] text-slate-500 font-bold tracking-widest uppercase font-sans">
           Content Evaluator &bull; Powered by Qwen 3.6 &bull; Bonario Group
         </p>
       </footer>

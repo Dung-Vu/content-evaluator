@@ -1,4 +1,5 @@
 import { BrandKey, getBrandConfig } from "../brands";
+import { BONARIO_SOCIAL_FOOTER } from "../brands/bonario";
 import {
   EvaluationResponse,
   normalizeAndValidateResponse,
@@ -7,6 +8,16 @@ import {
 type MessageContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } };
+
+const BONARIO_MOCK_SUGGESTED_REVISION = `Rèm linen cho không gian cần ánh sáng dịu
+
+Linen không cần được chọn vì một lời hứa quá kỹ thuật. Điều đáng giá hơn nằm ở cách bề mặt vải giúp ánh sáng đi vào mềm hơn, khiến khung cửa bớt nặng và tổng thể không gian trở nên thư thái hơn. Khi chất liệu có độ rủ vừa đủ, căn phòng cũng giữ được sự chỉn chu mà không bị cứng.
+
+Điểm quan trọng là cách vật liệu tham gia vào thẩm mỹ của căn phòng, chứ không chỉ nằm ở cảm giác chạm. Linen tạo một lớp nền nhẹ, giúp ánh sáng, màu tường và đồ nội thất đi cùng nhau theo cách hài hòa hơn. Đó là lý do chất liệu này phù hợp với những không gian cần sự bình tĩnh nhưng vẫn có chiều sâu.
+
+Nếu bạn cần chọn rèm theo ánh sáng, tỷ lệ cửa và cảm giác tổng thể của không gian, bạn có thể nhắn Bonario để được tư vấn phù hợp.
+
+${BONARIO_SOCIAL_FOOTER}`;
 
 function buildUserContent(
   caption: string,
@@ -177,6 +188,10 @@ export async function evaluateContentStream(
     "https://coding-intl.dashscope.aliyuncs.com/v1";
   const model = process.env.BAILIAN_MODEL || "qwen3.6-plus";
 
+  const expectedCriteriaNames = brandConfig.criteria.map((c) => c.name);
+  const hasImages = images.length > 0;
+  const encoder = new TextEncoder();
+
   // --- MOCK FALLBACK (If Bailian API Key is missing) ---
   if (!apiKey || apiKey.trim() === "") {
     console.warn("BAILIAN_API_KEY is not set. Falling back to Mock Evaluator.");
@@ -185,15 +200,18 @@ export async function evaluateContentStream(
       caption,
       contentType,
       serving,
-      images.length > 0,
+      hasImages,
     );
-    const mockJson = JSON.stringify(mockData);
+    const validated = normalizeAndValidateResponse(
+      mockData,
+      expectedCriteriaNames,
+      hasImages,
+    );
+    const validatedJson = JSON.stringify(validated);
 
-    const encoder = new TextEncoder();
     return new ReadableStream({
       async start(controller) {
-        // Stream mock JSON as raw chunks (no markdown fence so client regex works)
-        const chunk = `data: ${JSON.stringify({ choices: [{ delta: { content: mockJson } }] })}\n\n`;
+        const chunk = `data: ${JSON.stringify({ choices: [{ delta: { content: validatedJson } }] })}\n\n`;
         controller.enqueue(encoder.encode(chunk));
         await new Promise((resolve) => setTimeout(resolve, 80));
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
@@ -217,7 +235,6 @@ export async function evaluateContentStream(
         { role: "user", content: contentArray },
       ],
       stream: true,
-      response_format: { type: "json_object" },
     }),
   });
 
@@ -242,7 +259,101 @@ export async function evaluateContentStream(
     throw new Error("Response body is empty.");
   }
 
-  return response.body as ReadableStream<Uint8Array>;
+  // Wrap AI stream with a validation layer:
+  // - Passes through all SSE chunks in real-time
+  // - Accumulates delta content text
+  // - When [DONE] detected, validates the final JSON and sends a corrected event
+  const aiStream = response.body as ReadableStream<Uint8Array>;
+  return new ReadableStream({
+    async start(controller) {
+      const reader = aiStream.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let accumulatedContent = "";
+      let streamDone = false;
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
+
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const cleanLine = line.trim();
+            if (!cleanLine) {
+              controller.enqueue(encoder.encode("\n"));
+              continue;
+            }
+
+            if (cleanLine.startsWith("data: ")) {
+              const dataStr = cleanLine.slice(6);
+              if (dataStr === "[DONE]") {
+                streamDone = true;
+                break;
+              }
+
+              try {
+                const parsed = JSON.parse(dataStr);
+                const content =
+                  parsed.choices?.[0]?.delta?.content || "";
+                accumulatedContent += content;
+              } catch {
+                // Ignore parse errors for partial chunks
+              }
+
+              controller.enqueue(encoder.encode(line + "\n"));
+            } else {
+              controller.enqueue(encoder.encode(line + "\n"));
+            }
+          }
+
+          if (streamDone) break;
+        }
+      } catch (err) {
+        console.error("Stream read error:", err);
+        controller.error(err);
+        return;
+      } finally {
+        reader.releaseLock();
+      }
+
+      // Validate and send corrected final result
+      try {
+        let cleanContent = accumulatedContent.trim();
+        const jsonBlockMatch = cleanContent.match(
+          /```(?:json)?\s*([\s\S]*?)\s*```/i,
+        );
+        if (jsonBlockMatch && jsonBlockMatch[1]) {
+          cleanContent = jsonBlockMatch[1].trim();
+        } else {
+          const startIdx = cleanContent.indexOf("{");
+          const endIdx = cleanContent.lastIndexOf("}");
+          if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+            cleanContent = cleanContent.substring(startIdx, endIdx + 1);
+          }
+        }
+
+        const parsed = JSON.parse(cleanContent);
+        const validated = normalizeAndValidateResponse(
+          parsed,
+          expectedCriteriaNames,
+          hasImages,
+        );
+        const validatedChunk = `data: ${JSON.stringify({ choices: [{ delta: { content: JSON.stringify(validated) } }] })}\n\n`;
+        controller.enqueue(encoder.encode(validatedChunk));
+      } catch (err) {
+        console.error("Failed to validate final AI output:", err);
+      }
+
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  });
 }
 
 /**
@@ -263,35 +374,46 @@ function runMockEvaluator(
 
   // HEURISTICS FOR BONARIO
   if (brandKey === "bonario") {
-    // 1. Education Depth Fail if < 40 words OR doesn't contain technical or educational keywords
-    const hasEduKeywords =
-      /(cấu tạo|sợi|thoáng khí|nhược điểm|đặc tính|độ cứng|chịu lực|khác biệt|sau đây|nguyên nhân|tại sao|nguyên lý|bảo quản|tuổi thọ|quy tắc)/.test(
+    const firstMeaningfulSentence =
+      caption
+        .split(/[.!?\n]/)
+        .map((sentence) => sentence.trim())
+        .find(Boolean) || caption.trim();
+
+    // 1. Education Depth now starts by checking whether a concrete reader takeaway exists.
+    const hasTakeawaySignal =
+      /(giúp|để|từ đó|đó là lý do|nhờ vậy|phù hợp|nên chọn|có thể hiểu|rút ra|ưu tiên|khiến)/.test(
         lowercaseCaption,
       );
-    const eduDepthStatus = wordCount >= 40 && hasEduKeywords ? "PASS" : "FAIL";
+    const hasKnowledgePoint =
+      /(đặc tính|bảo quản|thoáng khí|giữ form|độ rủ|lọc sáng|cản sáng|riêng tư|không gian|phòng|ánh sáng|thẩm mỹ|thiết kế|bề mặt|chiều sâu|công năng|ứng dụng)/.test(
+        lowercaseCaption,
+      );
+    const eduDepthStatus =
+      wordCount >= 40 && hasTakeawaySignal && hasKnowledgePoint
+        ? "PASS"
+        : "FAIL";
     const eduDepthEvidence =
       eduDepthStatus === "PASS"
-        ? `"${words.slice(0, 8).join(" ")}..." chứa chiều sâu kiến thức hữu ích với ${wordCount} từ.`
-        : "Bài viết dưới 40 từ hoặc chỉ nhận xét thẩm mỹ chung chung mà không mang lại kiến thức vật liệu.";
+        ? `Sau khi đọc, có thể rút ra một ý cụ thể từ câu: "${firstMeaningfulSentence}."`
+        : "Nội dung chưa cho thấy rõ người đọc sẽ rút ra được điều gì cụ thể sau khi đọc bài này.";
 
-    // 2. Material Authority Fail if contains marketing empty words without specific numbers or technical names
+    // 2. Material Authority now accepts a concrete design/application point without heavy technical metrics.
     const hasAuthorityKeywords =
-      /(gsm|mohs|carrara|granite|vinyl|poly|%|độ dày|thông số|thực tế)/.test(
+      /(không gian|phòng|ánh sáng|thẩm mỹ|thiết kế|độ rủ|lọc sáng|cản sáng|riêng tư|bề mặt|chiều sâu|công năng|ứng dụng|trải nghiệm|giữ form|mềm|ấm|cân bằng|tỷ lệ)/.test(
         lowercaseCaption,
       );
     const hasVagueWords =
       /(cao cấp|chất lượng tốt|premium|bền đẹp|tinh xảo|giá tốt nhất|hàng đầu)/.test(
         lowercaseCaption,
       );
-    const materialAuthorityStatus =
-      (hasAuthorityKeywords && !hasVagueWords) ||
-      (wordCount > 50 && hasAuthorityKeywords)
-        ? "PASS"
-        : "FAIL";
+    const materialAuthorityStatus = hasAuthorityKeywords ? "PASS" : "FAIL";
     const materialAuthorityEvidence =
       materialAuthorityStatus === "PASS"
-        ? `Trích dẫn chứa thông tin kiểm chứng: "${lowercaseCaption.match(/(gsm|mohs|carrara|granite|vinyl|poly|%|độ dày)/)?.[0] || "thông tin kỹ thuật"}"`
-        : "Sử dụng từ quảng cáo mơ hồ như 'cao cấp' hoặc 'chất lượng tốt' mà không có thông số kiểm chứng.";
+        ? `Có một điểm cụ thể về ứng dụng hoặc thiết kế trong câu: "${firstMeaningfulSentence}."`
+        : hasVagueWords
+          ? "Nội dung chỉ nghiêng về lời khen chung chung mà chưa nêu ra một điểm ứng dụng hoặc thiết kế cụ thể của vật liệu."
+          : "Nội dung chưa nêu ra một điểm cụ thể về cách vật liệu vận hành trong thẩm mỹ, thiết kế hoặc không gian thực tế.";
 
     // 3. Narrative Arc Fail if no clear structure or lack of takeaway
     const hasParagraphs = caption.includes("\n");
@@ -306,7 +428,7 @@ function runMockEvaluator(
         : "Nội dung chỉ liệt kê thông số rời rạc hoặc viết liền một khối không có hook/takeaway rõ ràng.";
 
     // 4. Tone — v4: CTA mềm ở cuối chấp nhận được, dấu ! chỉ FAIL khi đi cùng thúc ép
-    const emojiCount = (caption.match(/[\u{1F300}-\u{1F6FF}]/gu) || []).length;
+    const emojiCount = (caption.match(/[\u{1F300}-\u{1FAFF}]|[\u{2600}-\u{27BF}]|[\u{FE00}-\u{FEFF}]|[\u{200D}]|[\u{2702}-\u{27B0}]|[\u{1F900}-\u{1F9FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{00A9}\u{00AE}\u{2122}\u{3030}\u{303D}]|\u{2764}/gu) || []).length;
     const hasSalesWords =
       /(siêu|ưu đãi|sale|giảm giá|đừng bỏ lỡ|inbox ngay|giá sốc|số lượng có hạn)/.test(
         lowercaseCaption,
@@ -367,17 +489,17 @@ function runMockEvaluator(
 
     const verdict_summary =
       verdict === "PASS"
-        ? "Nội dung hoàn hảo, đáp ứng xuất sắc toàn bộ 5 tiêu chí giáo dục và thẩm quyền vật liệu của Bonario."
+        ? "Nội dung đã cho người đọc một takeaway rõ ràng và giữ được đúng tinh thần biên tập của Bonario."
         : `Bài viết chưa đạt chuẩn thương hiệu do lỗi ở ${failCount} tiêu chí. Cần điều chỉnh lại.`;
 
     const fixes: string[] = [];
     if (eduDepthStatus === "FAIL")
       fixes.push(
-        "Bổ sung ít nhất 1 thông số kỹ thuật hoặc hướng dẫn sử dụng/bảo quản cụ thể (>40 từ).",
+        "Viết lại để người đọc rút ra được 1 takeaway cụ thể sau khi đọc, thay vì chỉ dừng ở mô tả đẹp hoặc cảm xúc chung.",
       );
     if (materialAuthorityStatus === "FAIL")
       fixes.push(
-        "Loại bỏ các từ marketing sáo rỗng (cao cấp, premium...) và thay bằng số liệu hoặc thuật ngữ kỹ thuật chính xác.",
+        "Bỏ các cụm marketing sáo rỗng và thêm 1 ý cụ thể về cách vật liệu được ứng dụng trong thẩm mỹ, thiết kế hoặc trải nghiệm không gian.",
       );
     if (narrativeArcStatus === "FAIL")
       fixes.push(
@@ -392,9 +514,7 @@ function runMockEvaluator(
         "Viết lại caption để giải thích đặc tính ẩn hoặc cơ sở khoa học đằng sau hình ảnh, tránh mô tả trực quan thô sơ.",
       );
 
-    const suggested_revision = `Linen có cấu trúc sợi mở — thoáng khí hơn polyester 40%, cực kỳ thích hợp cho rèm phòng ngủ khí hậu nhiệt đới. Tuy nhiên, nhược điểm của linen là dễ nhăn hơn sợi tổng hợp, cần là định kỳ để giữ form dáng phẳng phiu.
-
-Hiểu rõ đặc tính này giúp bạn đưa ra lựa chọn vật liệu tối ưu cho không gian sống của mình.`;
+    const suggested_revision = BONARIO_MOCK_SUGGESTED_REVISION;
 
     return {
       criteria,

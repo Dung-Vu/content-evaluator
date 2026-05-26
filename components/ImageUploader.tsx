@@ -3,6 +3,10 @@
 import { useRef, useState, useEffect } from "react";
 import { Upload, Trash2, X } from "lucide-react";
 import { BrandConfig } from "@/lib/brands";
+import {
+  getRemovedPreviewUrls,
+  isAcceptedImageFile,
+} from "@/lib/uploads/image-utils";
 
 export interface ImageFile {
   file: File;
@@ -62,6 +66,10 @@ const compressImage = (
 
         ctx.drawImage(img, 0, 0, width, height);
 
+        const isPng = file.type === "image/png";
+        const outputType = isPng ? "image/png" : "image/jpeg";
+        const extension = isPng ? ".png" : ".jpg";
+
         canvas.toBlob(
           (blob) => {
             if (!blob) {
@@ -70,16 +78,16 @@ const compressImage = (
             }
             const compressedFile = new File(
               [blob],
-              file.name.replace(/\.[^/.]+$/, "") + ".jpg",
+              file.name.replace(/\.[^/.]+$/, "") + extension,
               {
-                type: "image/jpeg",
+                type: outputType,
                 lastModified: Date.now(),
               },
             );
             resolve(compressedFile);
           },
-          "image/jpeg",
-          quality,
+          outputType,
+          isPng ? undefined : quality,
         );
       };
       img.onerror = () => resolve(file);
@@ -96,18 +104,29 @@ export default function ImageUploader({
   onError,
 }: ImageUploaderProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const previewUrlsRef = useRef<string[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [activePreviewUrl, setActivePreviewUrl] = useState<string | null>(null);
 
-  // Revoke blob URLs on unmount or when images change
+  // Revoke only URLs that are no longer used by the current image list.
   useEffect(() => {
-    const urls = images.map((img) => img.previewUrl);
+    const currentUrls = images.map((img) => img.previewUrl);
+    const removedUrls = getRemovedPreviewUrls(previewUrlsRef.current, currentUrls);
+
+    for (const url of removedUrls) {
+      URL.revokeObjectURL(url);
+    }
+
+    previewUrlsRef.current = currentUrls;
+  }, [images]);
+
+  useEffect(() => {
     return () => {
-      for (const url of urls) {
+      for (const url of previewUrlsRef.current) {
         URL.revokeObjectURL(url);
       }
     };
-  }, [images]);
+  }, []);
 
   // Process files from input or drop event
   const processFiles = async (files: FileList) => {
@@ -127,11 +146,10 @@ export default function ImageUploader({
     try {
       // Validate all files (check both MIME type and file extension fallback)
       for (const file of filesArray) {
-        const isValidType =
-          brandConfig.acceptedImageTypes.includes(file.type) ||
-          brandConfig.acceptedImageTypes.some((mime) =>
-            file.name.toLowerCase().endsWith(mime.replace("image/", ".")),
-          );
+        const isValidType = isAcceptedImageFile(
+          file,
+          brandConfig.acceptedImageTypes,
+        );
         if (!isValidType) {
           onError({
             message: `Định dạng '${file.name}' không hợp lệ. Chỉ chấp nhận JPG, PNG, WEBP.`,
@@ -184,16 +202,16 @@ export default function ImageUploader({
 
   // Handle Image Selection (input change event)
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files) return;
-    processFiles(e.target.files).then(() => {
-      if (e.target.value) e.target.value = "";
+    const files = e.currentTarget.files;
+    if (!files) return;
+    processFiles(files).then(() => {
+      e.currentTarget.value = "";
     });
   };
 
   // Remove Image
   const removeImage = (index: number) => {
     const copy = [...images];
-    URL.revokeObjectURL(copy[index].previewUrl);
     copy.splice(index, 1);
     onImagesChange(copy);
   };
@@ -219,7 +237,16 @@ export default function ImageUploader({
 
       {/* Drag and Drop Zone */}
       <div
+        tabIndex={0}
+        role="button"
+        aria-label="Tải lên hình ảnh thiết kế"
         onClick={() => fileInputRef.current?.click()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            fileInputRef.current?.click();
+          }
+        }}
         onDragOver={(e) => {
           e.preventDefault();
           setIsDragging(true);
@@ -234,7 +261,7 @@ export default function ImageUploader({
             await processFiles(e.dataTransfer.files);
           }
         }}
-        className={`bg-slate-950/40 border-2 border-dashed ${dragBorderClass} ${brand === "bonario" ? "hover:border-amber-500/40 hover:bg-slate-950/60" : "hover:border-indigo-500/40 hover:bg-slate-950/60"} rounded-2xl p-6 text-center cursor-pointer transition-all duration-300 flex flex-col items-center justify-center gap-2.5 group relative overflow-hidden`}
+        className={`bg-slate-950/40 border-2 border-dashed ${dragBorderClass} ${brand === "bonario" ? "hover:border-amber-500/40" : "hover:border-indigo-500/40"} hover:bg-slate-950/60 rounded-xl p-6 text-center cursor-pointer transition-all duration-300 flex flex-col items-center justify-center gap-2 group relative overflow-hidden`}
       >
         <input
           type="file"
@@ -245,54 +272,51 @@ export default function ImageUploader({
           className="hidden"
         />
         <div
-          className={`p-3 bg-slate-950/80 border border-slate-900 text-slate-400 ${brand === "bonario" ? "group-hover:text-amber-400 group-hover:border-amber-500/30 group-hover:shadow-[0_0_15px_rgba(245,158,11,0.15)]" : "group-hover:text-indigo-400 group-hover:border-indigo-500/30 group-hover:shadow-[0_0_15px_rgba(99,102,241,0.15)]"} transition-all duration-500 shadow-inner rounded-xl`}
+          className={`p-3 bg-slate-950/80 border border-slate-800 text-slate-400 ${brand === "bonario" ? "group-hover:text-amber-400 group-hover:border-amber-500/30" : "group-hover:text-indigo-400 group-hover:border-indigo-500/30"} transition-all shadow-inner rounded-xl`}
         >
-          <Upload className={`w-5 h-5 transition-transform duration-500 ${isDragging ? "scale-115 -translate-y-0.5" : "group-hover:-translate-y-0.5"}`} />
+          <Upload className="w-5 h-5" />
         </div>
-        <p className={`text-xs font-bold mt-1 transition-colors duration-350 ${isDragging ? brand === "bonario" ? "text-amber-400" : "text-indigo-400" : "text-slate-200"}`}>
-          {isDragging ? "Thả tập tin tại đây để tải lên..." : "Nhấp hoặc thả layout thiết kế vào đây"}
+        <p className="text-xs font-bold text-slate-200 mt-1">
+          Nhấp hoặc thả layout thiết kế vào đây
         </p>
-        <p className="text-[9px] text-slate-500 max-w-[280px] leading-normal font-medium tracking-wide">
+        <p className="text-[9px] text-slate-550 max-w-[280px] leading-normal">
           Hỗ trợ đối chiếu văn bản và hình ảnh thực tế.
         </p>
       </div>
 
       {/* Images Thumbnail List */}
       {images.length > 0 && (
-        <div className="grid grid-cols-4 sm:grid-cols-5 gap-3.5 bg-slate-950/60 border border-slate-900 rounded-xl p-3.5 mt-1 max-h-[220px] overflow-y-auto scrollbar-thin">
-          {images.map((img, idx) => (
+        <div className="grid grid-cols-4 sm:grid-cols-5 gap-3 bg-slate-950/50 border border-slate-800/60 rounded-xl p-3 mt-1 max-h-[220px] overflow-y-auto">
+          {images.map((img, idx) => {
+            const uniqueKey = `${img.file.name}-${img.file.size}-${img.file.lastModified}-${idx}`;
+            return (
             <div
-              key={idx}
+              key={uniqueKey}
               onClick={(e) => {
                 e.stopPropagation();
                 setActivePreviewUrl(img.previewUrl);
               }}
-              className="relative aspect-square bg-slate-950 rounded-lg overflow-hidden border border-slate-900 group shadow-inner cursor-pointer hover:border-slate-750 transition-all duration-300"
+              className="relative aspect-square bg-slate-900 rounded-lg overflow-hidden border border-slate-800 group shadow-inner cursor-pointer hover:border-slate-600 transition-all duration-200"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={img.previewUrl}
                 alt={`Upload Preview ${idx}`}
-                className="w-full h-full object-cover object-center group-hover:scale-105 group-hover:blur-[0.5px] transition-all duration-500"
+                className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
               />
-              {/* Hover magnifying glass badge */}
-              <div className="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center pointer-events-none">
-                <span className="text-[8px] font-bold text-slate-200 bg-slate-900/90 border border-slate-800 px-2 py-0.5 rounded shadow tracking-wider uppercase">
-                  Xem ảnh
-                </span>
-              </div>
               <button
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   removeImage(idx);
                 }}
-                className="absolute top-1.5 right-1.5 p-1 bg-rose-950/90 text-rose-450 hover:text-rose-200 border border-rose-500/20 rounded-md opacity-0 group-hover:opacity-100 transition-opacity duration-350 cursor-pointer z-10 hover:bg-rose-900"
+                className="absolute top-1 right-1 p-1 bg-rose-950/90 text-rose-400 hover:text-rose-200 border border-rose-500/30 rounded-md opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
               >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
