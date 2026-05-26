@@ -6,12 +6,15 @@ export * from "./types";
 export { bonarioConfig } from "./bonario";
 export { ordinaireConfig } from "./ordinaire";
 
+const brandMap: Record<BrandKey, BrandConfig> = {
+  bonario: bonarioConfig,
+  ordinaire: ordinaireConfig,
+};
+
 export function getBrandConfig(brand: BrandKey): BrandConfig {
-  if (brand === "bonario") {
-    return bonarioConfig;
+  const config = brandMap[brand];
+  if (!config) {
+    throw new Error(`Unsupported brand: ${brand}`);
   }
-  if (brand === "ordinaire") {
-    return ordinaireConfig;
-  }
-  throw new Error(`Unsupported brand: ${brand}`);
+  return config;
 }

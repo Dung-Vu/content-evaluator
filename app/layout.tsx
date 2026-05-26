@@ -1,20 +1,10 @@
 import type { Metadata } from "next";
-import { Plus_Jakarta_Sans, Lexend, JetBrains_Mono } from "next/font/google";
+import { Inter } from "next/font/google";
 import "./globals.css";
 
-const sansFont = Plus_Jakarta_Sans({
+const sansFont = Inter({
   variable: "--font-sans",
-  subsets: ["latin", "vietnamese"],
-});
-
-const displayFont = Lexend({
-  variable: "--font-display",
-  subsets: ["latin", "vietnamese"],
-});
-
-const monoFont = JetBrains_Mono({
-  variable: "--font-mono",
-  subsets: ["latin", "vietnamese"],
+  subsets: ["latin", "latin-ext"],
 });
 
 export const metadata: Metadata = {
@@ -31,7 +21,7 @@ export default function RootLayout({
   return (
     <html
       lang="vi"
-      className={`${sansFont.variable} ${displayFont.variable} ${monoFont.variable} h-full antialiased`}
+      className={`${sansFont.variable} h-full antialiased`}
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col" suppressHydrationWarning>

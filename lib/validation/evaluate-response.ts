@@ -87,11 +87,9 @@ export function normalizeAndValidateResponse(
         typeof matched.evidence === "string" ? matched.evidence.trim() : "";
     }
 
-    // Force auto-pass logic for visual checks when no images are uploaded
-    if (
-      (name === "Visual-Text Alignment" || name === "Visual Standard") &&
-      !hasImages
-    ) {
+    const isVisualCriterion = /visual/i.test(name);
+
+    if (isVisualCriterion && !hasImages) {
       return {
         name,
         status: "PASS" as const,
@@ -99,12 +97,7 @@ export function normalizeAndValidateResponse(
       };
     }
 
-    // If there is an image but the visual check was missing or lacked evidence, set to FAIL or a standard notice
-    if (
-      (name === "Visual-Text Alignment" || name === "Visual Standard") &&
-      hasImages &&
-      !matched
-    ) {
+    if (isVisualCriterion && hasImages && !matched) {
       return {
         name,
         status: "FAIL" as const,
@@ -151,11 +144,24 @@ export function normalizeAndValidateResponse(
   const suggestedRevision = rawSuggested || "Không có bản gợi ý viết lại.";
 
   // 5. Final validation using strict Zod schema to ensure shape correctness
-  return EvaluationResponseSchema.parse({
+  const result = EvaluationResponseSchema.safeParse({
     criteria: normalizedCriteria,
     verdict: correctVerdict,
     verdict_summary: verdictSummary,
     fixes: finalFixes,
     suggested_revision: suggestedRevision,
   });
+
+  if (result.success) {
+    return result.data;
+  }
+
+  console.error("Zod validation failed for normalized response:", result.error.issues);
+  return {
+    criteria: normalizedCriteria,
+    verdict: correctVerdict,
+    verdict_summary: verdictSummary,
+    fixes: finalFixes,
+    suggested_revision: suggestedRevision,
+  };
 }

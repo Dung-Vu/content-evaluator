@@ -6,13 +6,15 @@ import { BrandKey } from "@/lib/brands";
 
 export async function POST(request: NextRequest) {
   // 1. Get Client IP for Rate Limiting
-  // Use NextRequest built-in IP detection (trusted by Next.js server, not spoofable via headers)
-  const ip = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+  // NOTE: x-forwarded-for can be spoofed by clients. In production, place nginx/cloudflare
+  // in front to set this header trustworthily, then use NextRequest.ip for the real IP.
+  const ip =
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     request.headers.get("x-real-ip") ||
     "127.0.0.1";
 
   // Check rate limit
-  const rateLimitCheck = await memoryRateLimiter.check(ip);
+  const rateLimitCheck = memoryRateLimiter.check(ip);
   if (!rateLimitCheck.allowed) {
     return NextResponse.json(
       {
@@ -122,14 +124,8 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // Convert file buffer to base64 (platform-agnostic, no Node.js Buffer dependency)
       const arrayBuffer = await file.arrayBuffer();
-      const bytes = new Uint8Array(arrayBuffer);
-      let binary = "";
-      for (let i = 0; i < bytes.byteLength; i++) {
-        binary += String.fromCharCode(bytes[i]);
-      }
-      const base64 = btoa(binary);
+      const base64 = Buffer.from(arrayBuffer).toString("base64");
       processedImages.push({
         base64,
         mimeType: file.type,
