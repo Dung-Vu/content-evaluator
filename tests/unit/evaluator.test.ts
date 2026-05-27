@@ -9,8 +9,18 @@ import {
 } from "@/lib/validation/evaluate-response";
 import {
   findLastCompleteJsonObject,
+  extractPartialStreamState,
   parseFinalStreamResult,
 } from "@/lib/validation/stream-response";
+import {
+  getVerdictSummaryFallback,
+  MISSING_EVIDENCE_FALLBACK,
+  MISSING_FIX_FALLBACK,
+  MISSING_SUGGESTED_REVISION_FALLBACK,
+  normalizeEvidenceText,
+  normalizeModelText,
+  normalizeModelTextList,
+} from "@/lib/validation/evidence";
 import { memoryRateLimiter } from "@/lib/rate-limit/memory-rate-limiter";
 
 describe("Brand Configuration", () => {
@@ -345,6 +355,89 @@ describe("Response Normalization & Auto-Pass Logic", () => {
     expect(normalized.criteria.length).toBe(5);
     expect(normalized.verdict).toBe("REVISION NEEDED"); // 1 fail = REVISION NEEDED
   });
+
+  it("should replace placeholder evidence like slash-only values with fallback text", () => {
+    const normalized = normalizeAndValidateResponse(
+      {
+        criteria: [
+          {
+            name: "Material Authority",
+            status: "FAIL",
+            evidence: "/",
+          },
+        ],
+        verdict_summary: "",
+        suggested_revision: "",
+      },
+      expectedCriteriaBonario,
+      true,
+    );
+
+    expect(
+      normalized.criteria.find((c) => c.name === "Material Authority")
+        ?.evidence,
+    ).toBe(MISSING_EVIDENCE_FALLBACK);
+  });
+
+  it("should sanitize placeholder verdict summary, fixes, and suggested revision", () => {
+    const normalized = normalizeAndValidateResponse(
+      {
+        criteria: [
+          {
+            name: "Material Authority",
+            status: "FAIL",
+            evidence: "Thiếu dẫn chứng cụ thể.",
+          },
+        ],
+        verdict_summary: "/",
+        fixes: ["/", "Bổ sung một điểm ứng dụng cụ thể.", "Bổ sung một điểm ứng dụng cụ thể."],
+        suggested_revision: "n/a",
+      },
+      expectedCriteriaBonario,
+      true,
+    );
+
+    expect(normalized.verdict_summary).toBe(
+      getVerdictSummaryFallback("REVISION NEEDED"),
+    );
+    expect(normalized.fixes).toEqual(["Bổ sung một điểm ứng dụng cụ thể."]);
+    expect(normalized.suggested_revision).toBe(
+      MISSING_SUGGESTED_REVISION_FALLBACK,
+    );
+  });
+});
+
+describe("Evidence Normalization", () => {
+  it("should treat slash-only and backslash-only evidence as empty placeholders", () => {
+    expect(normalizeEvidenceText("/")).toBe("");
+    expect(normalizeEvidenceText("\\")).toBe("");
+    expect(normalizeEvidenceText('"/"')).toBe("");
+  });
+
+  it("should preserve real evidence text", () => {
+    expect(
+      normalizeEvidenceText(
+        "Có một điểm cụ thể về ứng dụng hoặc thiết kế trong câu đầu tiên.",
+      ),
+    ).toBe("Có một điểm cụ thể về ứng dụng hoặc thiết kế trong câu đầu tiên.");
+  });
+
+  it("should treat placeholder summary tokens as empty model text", () => {
+    expect(normalizeModelText("n/a")).toBe("");
+    expect(normalizeModelText(" - ")).toBe("");
+    expect(normalizeModelText("`/`")).toBe("");
+  });
+
+  it("should normalize model text lists by filtering placeholders and duplicates", () => {
+    expect(
+      normalizeModelTextList([
+        "/",
+        "Bổ sung CTA mềm ở cuối bài.",
+        "Bổ sung CTA mềm ở cuối bài.",
+        "n/a",
+      ]),
+    ).toEqual(["Bổ sung CTA mềm ở cuối bài."]);
+  });
 });
 
 describe("Rate Limiting", () => {
@@ -469,5 +562,81 @@ describe("Streaming Response Parsing", () => {
     expect(parsed.verdict_summary).toBe("Nội dung đạt chuẩn.");
     expect(parsed.suggested_revision).toBe("Ban viet lai cuoi cung.");
     expect(parsed.criteria.find((criterion) => criterion.name === "Material Authority")?.status).toBe("PASS");
+  });
+
+  it("should not surface slash-only placeholder evidence during partial streaming", () => {
+    const parsed = extractPartialStreamState(
+      '{"criteria":[{"name":"Material Authority","status":"FAIL","evidence":"/"}]}',
+      [
+        "Education Depth",
+        "Material Authority",
+        "Narrative Arc",
+        "Tone",
+        "Visual-Text Alignment",
+      ],
+      true,
+    );
+
+    expect(
+      parsed.criteria.find((criterion) => criterion.name === "Material Authority")
+        ?.evidence,
+    ).toBe(MISSING_EVIDENCE_FALLBACK);
+  });
+
+  it("should sanitize placeholder summary, fixes, and suggested revision from final stream payloads", () => {
+    const parsed = parseFinalStreamResult(
+      JSON.stringify({
+        criteria: [
+          {
+            name: "Material Authority",
+            status: "FAIL",
+            evidence: "Thiếu dẫn chứng cụ thể.",
+          },
+        ],
+        verdict: "REVISION NEEDED",
+        verdict_summary: "/",
+        fixes: ["/", "Bổ sung ví dụ thực tế."],
+        suggested_revision: "n/a",
+      }),
+      [
+        "Education Depth",
+        "Material Authority",
+        "Narrative Arc",
+        "Tone",
+        "Visual-Text Alignment",
+      ],
+      true,
+    );
+
+    expect(parsed.verdict_summary).toBe(
+      getVerdictSummaryFallback("REVISION NEEDED"),
+    );
+    expect(parsed.fixes).toEqual(["Bổ sung ví dụ thực tế."]);
+    expect(parsed.suggested_revision).toBe(
+      MISSING_SUGGESTED_REVISION_FALLBACK,
+    );
+  });
+
+  it("should add safe fallbacks when partial stream ends with evaluated criteria but placeholder metadata", () => {
+    const parsed = extractPartialStreamState(
+      '{"criteria":[{"name":"Education Depth","status":"PASS","evidence":"Có takeaway cụ thể."},{"name":"Material Authority","status":"FAIL","evidence":"Thiếu dẫn chứng vật liệu."},{"name":"Narrative Arc","status":"PASS","evidence":"Có cấu trúc rõ ràng."},{"name":"Tone","status":"PASS","evidence":"Giọng văn phù hợp."},{"name":"Visual-Text Alignment","status":"PASS","evidence":"Khớp nội dung."}],"verdict_summary":"-","fixes":["/"],"suggested_revision":"/"}',
+      [
+        "Education Depth",
+        "Material Authority",
+        "Narrative Arc",
+        "Tone",
+        "Visual-Text Alignment",
+      ],
+      true,
+    );
+
+    expect(parsed.verdict).toBe("REVISION NEEDED");
+    expect(parsed.verdict_summary).toBe(
+      getVerdictSummaryFallback("REVISION NEEDED"),
+    );
+    expect(parsed.fixes).toEqual([MISSING_FIX_FALLBACK]);
+    expect(parsed.suggested_revision).toBe(
+      MISSING_SUGGESTED_REVISION_FALLBACK,
+    );
   });
 });

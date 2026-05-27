@@ -12,71 +12,26 @@ export interface StreamEvaluationResponse {
   suggested_revision: string;
 }
 
+import {
+  getVerdictSummaryFallback,
+  MISSING_EVIDENCE_FALLBACK,
+  MISSING_FIX_FALLBACK,
+  MISSING_SUGGESTED_REVISION_FALLBACK,
+  NO_IMAGE_EVIDENCE,
+  PENDING_EVIDENCE_FALLBACK,
+  PENDING_VERDICT_SUMMARY_FALLBACK,
+  normalizeModelText,
+  normalizeModelTextList,
+  normalizeEvidenceText,
+} from "@/lib/validation/evidence";
+import { normalizeAndValidateResponse } from "@/lib/validation/evaluate-response";
+
 function mapParsedEvaluation(
   parsed: unknown,
   brandCriteriaNames: string[],
   hasImages: boolean,
 ): StreamEvaluationResponse {
-  const safeParsed =
-    typeof parsed === "object" && parsed !== null
-      ? (parsed as {
-          criteria?: Array<{
-            name?: string;
-            status?: string;
-            evidence?: string;
-          }>;
-          verdict?: string;
-          verdict_summary?: string;
-          fixes?: unknown;
-          suggested_revision?: string;
-        })
-      : {};
-
-  return {
-    criteria: brandCriteriaNames.map((name) => {
-      const match = safeParsed.criteria?.find(
-        (criterion) =>
-          criterion.name?.toLowerCase().trim() === name.toLowerCase().trim(),
-      );
-      const isVisual = /visual/i.test(name);
-
-      return {
-        name,
-        status:
-          match?.status === "FAIL"
-            ? "FAIL"
-            : match?.status === "PASS"
-              ? "PASS"
-              : isVisual && !hasImages
-                ? "PASS"
-                : "evaluating",
-        evidence:
-          match?.evidence ||
-          (isVisual && !hasImages
-            ? "Không có hình — auto PASS"
-            : "Đang phân tích..."),
-      };
-    }),
-    verdict:
-      safeParsed.verdict === "PASS" ||
-      safeParsed.verdict === "REVISION NEEDED" ||
-      safeParsed.verdict === "REJECT"
-        ? safeParsed.verdict
-        : "PENDING",
-    verdict_summary:
-      typeof safeParsed.verdict_summary === "string"
-        ? safeParsed.verdict_summary
-        : "",
-    fixes: Array.isArray(safeParsed.fixes)
-      ? safeParsed.fixes.filter(
-          (fix): fix is string => typeof fix === "string" && fix.length > 0,
-        )
-      : [],
-    suggested_revision:
-      typeof safeParsed.suggested_revision === "string"
-        ? safeParsed.suggested_revision
-        : "",
-  };
+  return normalizeAndValidateResponse(parsed, brandCriteriaNames, hasImages);
 }
 
 export function findLastCompleteJsonObject(streamText: string): string | null {
@@ -177,7 +132,7 @@ export function extractPartialStreamState(
       evidence: "",
     })),
     verdict: "PENDING",
-    verdict_summary: "Đang phân tích các tiêu chí...",
+    verdict_summary: PENDING_VERDICT_SUMMARY_FALLBACK,
     fixes: [],
     suggested_revision: "",
   };
@@ -197,7 +152,7 @@ export function extractPartialStreamState(
       !hasImages
     ) {
       criterion.status = "PASS";
-      criterion.evidence = "Không có hình — auto PASS";
+      criterion.evidence = NO_IMAGE_EVIDENCE;
       continue;
     }
 
@@ -223,7 +178,16 @@ export function extractPartialStreamState(
     );
     const evidenceMatch = streamText.match(evidenceRegex);
     if (evidenceMatch?.[1]) {
-      criterion.evidence = cleanQuote(evidenceMatch[1]);
+      criterion.evidence = normalizeEvidenceText(cleanQuote(evidenceMatch[1]));
+    }
+
+    if (
+      !criterion.evidence &&
+      (criterion.status === "PASS" || criterion.status === "FAIL")
+    ) {
+      criterion.evidence = MISSING_EVIDENCE_FALLBACK;
+    } else if (!criterion.evidence && criterion.status === "evaluating") {
+      criterion.evidence = PENDING_EVIDENCE_FALLBACK;
     }
   }
 
@@ -243,24 +207,28 @@ export function extractPartialStreamState(
     /"verdict_summary"\s*:\s*"([^"]*?)(?:"|$)/i,
   );
   if (summaryMatch?.[1]) {
-    state.verdict_summary = cleanQuote(summaryMatch[1]);
+    state.verdict_summary =
+      normalizeModelText(cleanQuote(summaryMatch[1])) ||
+      PENDING_VERDICT_SUMMARY_FALLBACK;
   }
 
   const fixesMatch = streamText.match(/"fixes"\s*:\s*\[([\s\S]*?)(?:\]|$)/i);
   if (fixesMatch?.[1]) {
-    state.fixes = [...fixesMatch[1].matchAll(/"([^"]*?)"/g)]
-      .map((match) => match[1].trim())
-      .filter(Boolean);
+    state.fixes = normalizeModelTextList(
+      [...fixesMatch[1].matchAll(/"([^"]*?)"/g)].map((match) => match[1]),
+    );
   }
 
   const suggestedMatch = streamText.match(
     /"suggested_revision"\s*:\s*"([\s\S]*?)(?:"|$)(?:\s*}|,\s*"|\s*$)/i,
   );
   if (suggestedMatch?.[1]) {
-    state.suggested_revision = suggestedMatch[1]
-      .replace(/\\n/g, "\n")
-      .replace(/\\"/g, '"')
-      .replace(/\\t/g, "\t");
+    state.suggested_revision = normalizeModelText(
+      suggestedMatch[1]
+        .replace(/\\n/g, "\n")
+        .replace(/\\"/g, '"')
+        .replace(/\\t/g, "\t"),
+    );
   }
 
   const allEvaluated = state.criteria.every(
@@ -272,6 +240,21 @@ export function extractPartialStreamState(
     ).length;
     state.verdict =
       failCount === 0 ? "PASS" : failCount <= 2 ? "REVISION NEEDED" : "REJECT";
+
+    const normalizedSummary = normalizeModelText(state.verdict_summary);
+    state.verdict_summary =
+      normalizedSummary && normalizedSummary !== PENDING_VERDICT_SUMMARY_FALLBACK
+        ? normalizedSummary
+        : getVerdictSummaryFallback(state.verdict);
+    state.fixes =
+      state.verdict === "PASS"
+        ? []
+        : state.fixes.length > 0
+          ? state.fixes
+          : [MISSING_FIX_FALLBACK];
+    state.suggested_revision =
+      normalizeModelText(state.suggested_revision) ||
+      MISSING_SUGGESTED_REVISION_FALLBACK;
   } else {
     state.verdict = "PENDING";
   }

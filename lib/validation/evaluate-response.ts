@@ -1,4 +1,15 @@
 import { z } from "zod";
+import {
+  getVerdictSummaryFallback,
+  MISSING_EVIDENCE_FALLBACK,
+  MISSING_FIX_FALLBACK,
+  MISSING_SUGGESTED_REVISION_FALLBACK,
+  MISSING_VISUAL_EVIDENCE_FALLBACK,
+  NO_IMAGE_EVIDENCE,
+  normalizeModelText,
+  normalizeModelTextList,
+  normalizeEvidenceText,
+} from "@/lib/validation/evidence";
 
 // Client input validation schema (for checking basic parameters)
 export const RequestValidationSchema = z.object({
@@ -83,8 +94,7 @@ export function normalizeAndValidateResponse(
 
     if (matched) {
       status = matched.status === "FAIL" ? "FAIL" : "PASS";
-      evidence =
-        typeof matched.evidence === "string" ? matched.evidence.trim() : "";
+      evidence = normalizeEvidenceText(matched.evidence);
     }
 
     const isVisualCriterion = /visual/i.test(name);
@@ -93,7 +103,7 @@ export function normalizeAndValidateResponse(
       return {
         name,
         status: "PASS" as const,
-        evidence: "Không có hình — auto PASS",
+        evidence: NO_IMAGE_EVIDENCE,
       };
     }
 
@@ -101,14 +111,14 @@ export function normalizeAndValidateResponse(
       return {
         name,
         status: "FAIL" as const,
-        evidence: "Thiếu thông tin đánh giá hình ảnh từ mô hình.",
+        evidence: MISSING_VISUAL_EVIDENCE_FALLBACK,
       };
     }
 
     return {
       name,
       status,
-      evidence: evidence || "Không tìm thấy thông tin đánh giá từ mô hình.",
+      evidence: evidence || MISSING_EVIDENCE_FALLBACK,
     };
   });
 
@@ -116,18 +126,11 @@ export function normalizeAndValidateResponse(
   const correctVerdict = calculateVerdict(normalizedCriteria);
 
   // 4. Safely parse verdict summary, fixes and suggested revision
-  const rawVerdictSummary =
-    typeof obj.verdict_summary === "string" ? obj.verdict_summary.trim() : "";
+  const rawVerdictSummary = normalizeModelText(obj.verdict_summary);
   const verdictSummary =
-    rawVerdictSummary ||
-    (correctVerdict === "PASS"
-      ? "Nội dung đạt chuẩn thương hiệu."
-      : "Nội dung cần điều chỉnh lại để phù hợp hơn với thương hiệu.");
+    rawVerdictSummary || getVerdictSummaryFallback(correctVerdict);
 
-  const rawFixes = Array.isArray(obj.fixes) ? (obj.fixes as unknown[]) : [];
-  const fixes: string[] = rawFixes
-    .map((f) => (typeof f === "string" ? f.trim() : ""))
-    .filter((f): f is string => f.length > 0);
+  const fixes = normalizeModelTextList(obj.fixes);
 
   // If verdict is PASS, fixes list must be empty
   const finalFixes =
@@ -135,13 +138,11 @@ export function normalizeAndValidateResponse(
       ? []
       : fixes.length > 0
         ? fixes
-        : ["Cần sửa đổi các tiêu chuẩn chưa đạt."];
+        : [MISSING_FIX_FALLBACK];
 
-  const rawSuggested =
-    typeof obj.suggested_revision === "string"
-      ? obj.suggested_revision.trim()
-      : "";
-  const suggestedRevision = rawSuggested || "Không có bản gợi ý viết lại.";
+  const rawSuggested = normalizeModelText(obj.suggested_revision);
+  const suggestedRevision =
+    rawSuggested || MISSING_SUGGESTED_REVISION_FALLBACK;
 
   // 5. Final validation using strict Zod schema to ensure shape correctness
   const result = EvaluationResponseSchema.safeParse({

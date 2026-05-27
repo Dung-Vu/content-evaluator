@@ -4,6 +4,10 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { Sparkles, FileText, RefreshCw, AlertTriangle, X } from "lucide-react";
 import { BrandKey, getBrandConfig } from "@/lib/brands";
 import {
+  NO_IMAGE_EVIDENCE,
+  PENDING_VERDICT_SUMMARY_FALLBACK,
+} from "@/lib/validation/evidence";
+import {
   extractPartialStreamState,
   parseFinalStreamResult,
   type StreamEvaluationResponse,
@@ -19,15 +23,29 @@ function readWithTimeout(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   timeoutMs: number,
 ): Promise<ReadableStreamReadResult<Uint8Array>> {
-  return Promise.race([
-    reader.read(),
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () => reject(new Error("Stream timeout — AI không phản hồi.")),
-        timeoutMs,
-      ),
-    ),
-  ]);
+  return new Promise((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      reject(new Error("Stream timeout — AI không phản hồi."));
+    }, timeoutMs);
+
+    reader.read().then(
+      (result) => {
+        clearTimeout(timeoutId);
+        resolve(result);
+      },
+      (error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      },
+    );
+  });
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
 }
 
 // Visual premium themes mapped by active brand
@@ -105,6 +123,12 @@ export default function Home() {
   useEffect(() => {
     document.documentElement.dataset.brand = brand;
   }, [brand]);
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   const wordCount = useMemo(
     () => caption.trim().split(/\s+/).filter(Boolean).length,
@@ -213,11 +237,11 @@ export default function Home() {
               (name === "Visual-Text Alignment" ||
                 name === "Visual Standard") &&
               images.length === 0
-                ? "Không có hình — auto PASS"
+                ? NO_IMAGE_EVIDENCE
                 : "",
           })),
           verdict: "PENDING",
-          verdict_summary: "Đang phân tích nội dung...",
+          verdict_summary: PENDING_VERDICT_SUMMARY_FALLBACK,
           fixes: [],
           suggested_revision: "",
         };
@@ -278,6 +302,9 @@ export default function Home() {
             setResult(finalResult);
           }
         } catch (streamErr: unknown) {
+          if (isAbortError(streamErr)) {
+            return;
+          }
           const msg =
             streamErr instanceof Error
               ? streamErr.message
@@ -293,6 +320,9 @@ export default function Home() {
         setResult(data);
       }
     } catch (err: unknown) {
+      if (isAbortError(err)) {
+        return;
+      }
       console.error(err);
       const errorMessage =
         err instanceof Error
@@ -303,6 +333,7 @@ export default function Home() {
         code: "CONNECTION_ERROR",
       });
     } finally {
+      abortControllerRef.current = null;
       setIsSubmitting(false);
       setIsStreaming(false);
     }
